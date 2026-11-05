@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { render } from 'ink-testing-library';
-import { Overview } from './Overview.tsx';
+import { Overview, overviewLayout } from './Overview.tsx';
 import { THEMES } from '../theme.ts';
+import { displayWidth } from '../util/fmt.ts';
 import type { TurnRecord } from '../sources/types.ts';
 
 const NOW = new Date('2026-11-05T15:00:00').getTime();
@@ -58,4 +59,43 @@ test('renders zeros with em-dash and no NaN on empty records', () => {
   assert.ok(!frame.includes('NaN'));
   assert.ok(!frame.includes('Infinity'));
   assert.ok(frame.includes('no activity'));
+});
+
+const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+
+test('every frame line fits 100 columns with three sources (layout regression)', () => {
+  const inst = render(
+    <Overview records={records} now={NOW} theme={THEMES[0]} srcFilter="all" />,
+  );
+  const frame = stripAnsi(inst.lastFrame()!);
+  inst.unmount();
+  const offenders = frame.split('\n').filter((l) => displayWidth(l) > 100);
+  assert.deepEqual(offenders, []);
+});
+
+test('no ALL card: one card per registered source only', () => {
+  const inst = render(
+    <Overview records={records} now={NOW} theme={THEMES[0]} srcFilter="all" />,
+  );
+  const frame = stripAnsi(inst.lastFrame()!);
+  inst.unmount();
+  assert.ok(!/^ALL\s*$/m.test(frame));
+  assert.ok(frame.includes('CODEX'));
+  assert.ok(frame.includes('CLAUDE'));
+  assert.ok(frame.includes('DSH'));
+  // aggregate still visible as a summary line
+  assert.ok(/ALL\s+\S+ tok\/s/.test(frame) || /Σ/.test(frame));
+});
+
+test('overviewLayout sizes histogram to fit beside MODEL VELOCITY', () => {
+  for (const width of [80, 100, 120, 160]) {
+    for (const nSeries of [1, 2, 3, 4]) {
+      const { histBuckets, velocityWidth } = overviewLayout(width, nSeries);
+      assert.ok(histBuckets >= 4, `width=${width} series=${nSeries}`);
+      assert.ok(
+        histBuckets * nSeries + velocityWidth + 2 <= width - 4,
+        `width=${width} series=${nSeries}: hist ${histBuckets * nSeries} + vel ${velocityWidth} must fit in ${width - 4}`,
+      );
+    }
+  }
 });

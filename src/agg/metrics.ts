@@ -34,6 +34,7 @@ export interface SourceSummary {
   inTok: number;
   outTok: number;
   cacheRead: number;
+  cacheWrite: number;
   reqs: number;
   sessions: number;
   activeMs: number;
@@ -57,6 +58,7 @@ export function sourceSummaries(records: TurnRecord[], sparkBuckets = 32): Sourc
       src,
       avgTps: activeMs > 0 ? (outTok / activeMs) * 1000 : null,
       inTok, outTok, cacheRead,
+      cacheWrite: list.reduce((s, r) => s + r.cacheWrite, 0),
       reqs: list.length,
       sessions: new Set(list.map((r) => r.sid)).size,
       activeMs,

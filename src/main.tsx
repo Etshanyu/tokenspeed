@@ -91,7 +91,8 @@ function Root(props: {
   };
 
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
+    // 30s clock: a 1s tick re-rendered the whole tree and caused visible flicker
+    const t = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(t);
   }, []);
 

@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useReducer } from 'react';
 import { Box, Text, useStdout } from 'ink';
 import Gradient from 'ink-gradient';
-import BigText from 'ink-big-text';
 import { homedir } from 'node:os';
 import { ADAPTERS, filterKeys } from '../sources/index.ts';
 import { THEMES } from '../theme.ts';
@@ -136,13 +135,13 @@ export function App(props: AppProps): React.ReactElement {
     };
   }, [fKeys, props.onRefresh, props.onQuit]);
 
-  const wide = width >= 90;
-  const banner = wide ? (
-    <Gradient key={`g${state.themeIdx}`} colors={[theme.gradFrom, theme.gradTo]}>
-      <BigText text="TOKEN SPEED" font="tiny" />
-    </Gradient>
-  ) : (
-    <Text bold color={theme.accent}>TOKEN SPEED</Text>
+  // compact one-line header (screenshot style): big banner blocks caused flicker on every refresh
+  const banner = (
+    <Text bold>
+      <Text color={theme.accent}>❖ </Text>
+      <Gradient key={`g${state.themeIdx}`} colors={[theme.gradFrom, theme.gradTo]}>TOKEN SPEED</Gradient>
+      <Text color={theme.dim}> / observatory</Text>
+    </Text>
   );
 
   const winLabel: Record<WindowKey, string> = { today: 'Today', '7d': '7 days', '30d': '30 days', all: 'All time' };
@@ -152,7 +151,7 @@ export function App(props: AppProps): React.ReactElement {
       <Box flexDirection="row" justifyContent="space-between">
         <Box flexDirection="column">
           {banner}
-          <Text color={theme.dim}>observatory · {adapters.map((a) => a.label.toLowerCase()).join(' + ')} · local token telemetry</Text>
+          <Text color={theme.dim}>{adapters.map((a) => a.label.toLowerCase()).join(' + ')} · local token telemetry</Text>
         </Box>
         <Box flexDirection="column" alignItems="flex-end">
           <Text color={live ? theme.accent : theme.dim}>{live ? '● LIVE' : '○ paused'}</Text>
@@ -177,7 +176,7 @@ export function App(props: AppProps): React.ReactElement {
           }).join(' · ')}
         </Text>
         <Text color={theme.dim}>
-          WINDOW t Today · w cycle · a All → <Text bold color={theme.text}>{winLabel[state.win]}</Text>
+          WINDOW t Today · w cycle · a All &gt; <Text bold color={theme.text}>{winLabel[state.win]}</Text>
         </Text>
       </Box>
 

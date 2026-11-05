@@ -72,10 +72,10 @@ test('app shell renders banner, nav, filters, status bar', () => {
   );
   const frame = inst.lastFrame()!;
   inst.unmount(); // release the stdin listener so the runner can exit
-  // banner: BigText block art has no literal "TOKEN SPEED" string; assert identity via
-  // the always-present subtitle plus block-glyph art (or plain-text fallback on narrow terminals)
-  assert.ok(frame.includes('observatory · codex + claude + dsh'));
-  assert.ok(frame.includes('█') || /TOKEN SPEED/.test(frame));
+  // banner: compact one-line header with gradient TOKEN SPEED + subtitle
+  assert.ok(frame.includes('observatory'));
+  assert.ok(frame.includes('codex + claude + dsh'));
+  assert.ok(/TOKEN SPEED/.test(frame));
   assert.ok(frame.includes('[F1] Overview'));
   assert.ok(frame.includes('[F2] Timeline'));
   assert.ok(frame.includes('SOURCE'));

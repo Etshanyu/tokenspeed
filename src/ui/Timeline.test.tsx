@@ -19,6 +19,8 @@ const week: TurnRecord[] = Array.from({ length: 7 }, (_, d) =>
   rec({ src: 'claude', ts: NOW - (6 - d) * 86400_000 - 3600_000, outTok: 50 + d * 25 }),
 );
 
+const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+
 test('timeline renders title, bucket labels and peak summary', () => {
   const inst = render(
     <Timeline records={week} now={NOW} theme={THEMES[0]} srcFilter="all" win="7d" />,
@@ -38,6 +40,19 @@ test('timeline empty window renders no-activity state', () => {
   const frame = inst.lastFrame()!;
   inst.unmount();
   assert.ok(frame.includes('no activity'));
+});
+
+test('timeline uses plan bucket counts (7d -> 28 buckets) regardless of width', () => {
+  const inst = render(
+    <Timeline records={week} now={NOW} theme={THEMES[0]} srcFilter="all" win="7d" />,
+  );
+  const frame = inst.lastFrame()!;
+  inst.unmount();
+  assert.ok(frame.includes('6h buckets'));
+  // chart rows must be exactly 28 cells wide
+  const rows = frame.split('\n').map(stripAnsi).filter((l) => l.length > 10 && /[█▀▄· ]{20,}/.test(l));
+  assert.ok(rows.length > 0);
+  for (const r of rows) assert.equal(r.length, 28);
 });
 
 test('timelineChart rises left to right with trend dots', () => {

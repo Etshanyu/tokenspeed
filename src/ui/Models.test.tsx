@@ -67,3 +67,14 @@ test('empty records render no-models state', () => {
   inst.unmount();
   assert.ok(frame.includes('no models'));
 });
+
+test('active sort column shows direction marker without truncating the header', () => {
+  const inst = render(
+    <Models records={records} now={NOW} theme={THEMES[0]} srcFilter="all" sort={{ col: 2, dir: -1 }} onSort={() => {}} />,
+  );
+  const frame = inst.lastFrame()!;
+  inst.unmount();
+  assert.ok(frame.includes('REQS')); // header intact, not 'REQS…'
+  assert.ok(!frame.split('\n')[1].includes('…') || !frame.split('\n')[1].includes('REQS'));
+  assert.ok(/REQS\s*(v|\^|▼|▲)/.test(frame)); // direction marker visible
+});

@@ -10,7 +10,7 @@ import type { WindowKey } from '../agg/metrics.ts';
 import { Table } from './comp/Table.tsx';
 import type { Column } from './comp/Table.tsx';
 import { gaugeBar, heatStrip, histogram, sparkline } from './comp/chart.ts';
-import { fmtDur, fmtTok, fmtTps, projShort } from '../util/fmt.ts';
+import { fmtDur, fmtTok, fmtTps, projShort, truncateToWidth, displayWidth } from '../util/fmt.ts';
 
 export interface OverviewProps {
   records: TurnRecord[];
@@ -20,7 +20,18 @@ export interface OverviewProps {
   win?: WindowKey;
 }
 
-/** smooth 300ms tween on big numbers; static in tests (no changes) */
+/** Width planner: histogram buckets must fit beside MODEL VELOCITY inside the bordered panel. */
+export function overviewLayout(width: number, nSeries: number): { histBuckets: number; velocityWidth: number } {
+  const velocityWidth = 54; // 22 model + 1 + 24 gauge + 1 + 6 tps
+  const content = width - 6; // box border (2) + padding (2) + safety (2)
+  const avail = Math.max(6, content - velocityWidth - 2);
+  return {
+    velocityWidth,
+    histBuckets: Math.max(4, Math.floor(avail / Math.max(1, nSeries))),
+  };
+}
+
+/** 2-step value tween: enough motion to notice, not enough to flicker */
 function useTween(target: number | null): number | null {
   const [display, setDisplay] = useState<number | null>(target);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -29,14 +40,14 @@ function useTween(target: number | null): number | null {
       setDisplay(target);
       return;
     }
-    const steps = 10;
+    const steps = 2;
     let i = 1;
     const from = display;
     const tick = (): void => {
       setDisplay(from + ((target - from) * i) / steps);
-      if (i++ < steps) timer.current = setTimeout(tick, 30);
+      if (i++ < steps) timer.current = setTimeout(tick, 80);
     };
-    timer.current = setTimeout(tick, 30);
+    timer.current = setTimeout(tick, 80);
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
@@ -95,46 +106,35 @@ export function Overview(props: OverviewProps): React.ReactElement {
   const outTokAll = filtered.reduce((s, r) => s + r.outTok, 0);
   const activeAll = filtered.reduce((s, r) => s + Math.max(0, r.durMs), 0);
   const totalAll = filtered.reduce((s, r) => s + r.inTok + r.outTok + r.cacheRead + r.cacheWrite, 0);
-  const allSpark = new Array(32).fill(0);
-  {
-    const tss = filtered.map((r) => r.ts);
-    if (tss.length) {
-      const min = Math.min(...tss), max = Math.max(...tss), span = Math.max(1, max - min);
-      for (const r of filtered) {
-        allSpark[Math.min(31, Math.floor(((r.ts - min) / span) * 32))] += r.outTok;
-      }
-    }
-  }
 
+  // one card per source (screenshot layout); the aggregate lives in the headline above
   const cards: React.ReactElement[] = [];
-  if (filtered.length > 0) {
-    cards.push(
-      <SourceCard key="all" label="ALL" color={theme.accent}
-        avgTps={activeAll > 0 ? (outTokAll / activeAll) * 1000 : null}
-        outTok={outTokAll} activeMs={activeAll} totalTok={totalAll}
-        reqs={filtered.length} spark={allSpark} theme={theme} />,
-    );
-  }
   for (const s of summaries) {
     const adapter = ADAPTERS.find((a) => a.id === s.src);
     cards.push(
       <SourceCard key={s.src} label={adapter?.label ?? s.src} color={theme.srcColors[s.src] ?? theme.accent}
         avgTps={s.avgTps} outTok={s.outTok} activeMs={s.activeMs}
-        totalTok={s.inTok + s.outTok + s.cacheRead}
+        totalTok={s.inTok + s.outTok + s.cacheRead + s.cacheWrite}
         reqs={s.reqs} spark={s.spark} theme={theme} />,
     );
   }
 
   const stripWidth = Math.max(20, Math.min(60, width - 22));
   const models = modelStats(filtered).slice(0, 5);
-  const maxTps = Math.max(1, ...models.map((m) => m.avgTps ?? 0));
+  let maxTps = 1;
+  for (const m of models) maxTps = Math.max(maxTps, m.avgTps ?? 0);
 
   const histSources = [...new Set(filtered.map((r) => r.src))];
-  const tss = filtered.map((r) => r.ts);
-  const range = tss.length
-    ? { from: Math.min(...tss), to: Math.max(...tss) + 1 }
+  let minTs = Infinity, maxTs = -Infinity;
+  for (const r of filtered) {
+    if (r.ts < minTs) minTs = r.ts;
+    if (r.ts > maxTs) maxTs = r.ts;
+  }
+  const range = Number.isFinite(minTs)
+    ? { from: minTs, to: maxTs + 1 }
     : { from: now - 86400_000, to: now };
-  const histBuckets = buckets(filtered, range, Math.max(10, Math.floor((width - 30) / 2)));
+  const { histBuckets } = overviewLayout(width, Math.max(1, histSources.length));
+  const histBs = buckets(filtered, range, histBuckets);
 
   const sessions = latestSessions(filtered, 8);
   const rows: SessionDisplayRow[] = sessions.map((s) => ({
@@ -150,6 +150,13 @@ export function Overview(props: OverviewProps): React.ReactElement {
 
   return (
     <Box flexDirection="column">
+      {cards.length > 0 && (
+        <Text>
+          <Text bold color={theme.accent}>ALL </Text>
+          <Text bold color={theme.text}>{fmtTps(activeAll > 0 ? (outTokAll / activeAll) * 1000 : null)} tok/s</Text>
+          <Text color={theme.dim}> · Σ {fmtTok(outTokAll)} out · {fmtTok(totalAll)} tok · {filtered.length} reqs</Text>
+        </Text>
+      )}
       {cards.length > 0 ? (
         <Box columnGap={1}>{cards}</Box>
       ) : (
@@ -172,13 +179,17 @@ export function Overview(props: OverviewProps): React.ReactElement {
       <Box columnGap={2} marginTop={1}>
         <Box flexDirection="column">
           <Text bold color={theme.text}>MODEL VELOCITY</Text>
-          {models.map((m) => (
-            <Box key={m.model} columnGap={1}>
-              <Text color={theme.dim}>{m.model.slice(0, 24).padEnd(24)}</Text>
-              <Text>{gaugeBar(m.avgTps ?? 0, maxTps, 24, '█', '░')}</Text>
-              <Text color={theme.text}>{fmtTps(m.avgTps)}</Text>
-            </Box>
-          ))}
+          {models.map((m) => {
+            const name = truncateToWidth(m.model, 22);
+            const pad = ' '.repeat(Math.max(0, 22 - displayWidth(name)));
+            return (
+              <Box key={m.model} columnGap={1}>
+                <Text color={theme.dim}>{name}{pad}</Text>
+                <Text>{gaugeBar(m.avgTps ?? 0, maxTps, 24, '█', '░')}</Text>
+                <Text color={theme.text}>{fmtTps(m.avgTps)}</Text>
+              </Box>
+            );
+          })}
           {models.length === 0 && <Text color={theme.dim}>—</Text>}
         </Box>
 
@@ -187,10 +198,10 @@ export function Overview(props: OverviewProps): React.ReactElement {
           {histSources.length > 0 ? (
             histogram(
               histSources.map((src) => ({
-                values: histBuckets.map((b) => b.out[src] ?? 0),
+                values: histBs.map((b) => b.out[src] ?? 0),
                 color: theme.srcColors[src] ?? theme.accent,
               })),
-              Math.max(10, Math.floor((width - 30) / 2)),
+              histBuckets,
               6,
             ).map((line, i) => <Text key={i}>{line}</Text>)
           ) : (

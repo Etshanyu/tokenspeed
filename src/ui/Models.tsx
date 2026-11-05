@@ -25,7 +25,7 @@ interface DisplayRow {
 }
 
 const COLUMNS: Column<DisplayRow>[] = [
-  { key: 'model', header: 'MODEL', width: 24, render: (r) => r.model },
+  { key: 'model', header: 'MODEL', width: 22, render: (r) => r.model },
   { key: 'srcs', header: 'SRC', width: 8, render: (r) => r.srcs },
   { key: 'reqs', header: 'REQS', width: 5, align: 'r', render: (r) => String(r.reqs) },
   { key: 'inTok', header: 'IN', width: 7, align: 'r', render: (r) => fmtTok(r.inTok) },
@@ -34,8 +34,8 @@ const COLUMNS: Column<DisplayRow>[] = [
   { key: 'avgTps', header: 'AVG TKS', width: 7, align: 'r', render: (r) => fmtTps(r.avgTps) },
   { key: 'peakTps', header: 'PEAK', width: 6, align: 'r', render: (r) => fmtTps(r.peakTps) },
   {
-    key: 'share', header: 'SHARE', width: 16, render: (r) => {
-      const bar = gaugeBar(r.share, 1, 9, '█', '░');
+    key: 'share', header: 'SHARE', width: 14, render: (r) => {
+      const bar = gaugeBar(r.share, 1, 7, '█', '░');
       return `${bar} ${fmtPct(r.share).padStart(6)}`;
     },
   },
@@ -79,8 +79,9 @@ export function Models(props: ModelsProps): React.ReactElement {
       ) : (
         <Table
           columns={COLUMNS.map((c, i) =>
+            // active sort column widens by 2 so the ASCII direction marker never truncates the header
             i === sort.col
-              ? { ...c, header: (c.header.includes('▼') || c.header.includes('▲') ? c.header.slice(0, -2) : c.header) + (sort.dir === -1 ? ' ▼' : ' ▲'), width: c.width }
+              ? { ...c, header: `${c.header} ${sort.dir === -1 ? 'v' : '^'}`, width: c.width + 2 }
               : c,
           )}
           rows={sorted}

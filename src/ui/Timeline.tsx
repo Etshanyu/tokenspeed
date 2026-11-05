@@ -95,13 +95,17 @@ export function Timeline(props: TimelineProps): React.ReactElement {
   const width = stdout?.columns ?? 100;
 
   const filtered = applyFilters(records, srcFilter, windowRange(win, now));
-  const tss = filtered.map((r) => r.ts);
-  const range = tss.length
-    ? { from: Math.min(...tss), to: Math.max(...tss) + 1 }
+  let minTs = Infinity, maxTs = -Infinity;
+  for (const r of filtered) {
+    if (r.ts < minTs) minTs = r.ts;
+    if (r.ts > maxTs) maxTs = r.ts;
+  }
+  const range = Number.isFinite(minTs)
+    ? { from: minTs, to: maxTs + 1 }
     : windowRange(win, now);
-  const n = bucketCount(win, range.to - range.from);
-  const chartWidth = Math.max(10, Math.min(70, width - 24));
-  const bs = buckets(filtered, range, chartWidth);
+  // plan bucket counts: today 24 / 7d 28 / 30d 30 / all ≤40 — chart width follows, not vice versa
+  const n = Math.max(4, Math.min(bucketCount(win, range.to - range.from), Math.max(10, width - 24)));
+  const bs = buckets(filtered, range, n);
 
   const srcs = [...new Set(filtered.map((r) => r.src))];
   const series = srcs.map((src) => ({
@@ -137,7 +141,7 @@ export function Timeline(props: TimelineProps): React.ReactElement {
             {rows.map((line, i) => <Text key={i}>{line}</Text>)}
           </Box>
           <Text color={theme.dim}>
-            {fmtLabel(bs[0].t0, withHour).padEnd(12)}{'…'.repeat(Math.max(1, Math.floor(chartWidth / 2) - 12))}{fmtLabel(bs[bs.length - 1].t0 + (range.to - range.from) / bs.length, withHour).padStart(12)}
+            {fmtLabel(bs[0].t0, withHour).padEnd(12)}{'…'.repeat(Math.max(1, Math.floor(n / 2) - 12))}{fmtLabel(bs[bs.length - 1].t0 + (range.to - range.from) / bs.length, withHour).padStart(12)}
           </Text>
           <Text color={theme.dim}>
             Σ out <Text color={theme.text}>{fmtTok(outTotal)}</Text> · in {fmtTok(inTotal)} · cache {fmtTok(cacheTotal)} · peak <Text color={theme.accent}>{fmtTok(peakVal)}</Text> @ {fmtLabel(bs[peakIdx].t0, withHour)}
