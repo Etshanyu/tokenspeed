@@ -13,7 +13,8 @@ export function fmtTok(n: number): string {
     [1e3, 'k'],
   ];
   for (const [div, suffix] of tiers) {
-    if (n >= div) return stripTrailingZero((n / div).toFixed(1)) + suffix;
+    // 0.9995 factor: a value that rounds up to 1000.0 of a tier belongs to the next one
+    if (n >= div * 0.9995) return stripTrailingZero((n / div).toFixed(1)) + suffix;
   }
   return String(n);
 }

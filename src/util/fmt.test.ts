@@ -36,7 +36,8 @@ test('fmtPct renders fraction as percentage', () => {
 });
 
 test('displayWidth measures CJK as width 2', () => {
-  assert.equal(displayWidth('中文ab'), 4);
+  assert.equal(displayWidth('中文'), 4);
+  assert.equal(displayWidth('中文ab'), 6);
   assert.equal(displayWidth('abc'), 3);
 });
 
