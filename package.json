@@ -1,0 +1,31 @@
+{
+  "name": "tokenspeed",
+  "version": "0.1.0",
+  "description": "TOKEN SPEED observatory - local token telemetry TUI for Claude Code / Codex / DSH",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "tokenspeed": "src/main.tsx"
+  },
+  "scripts": {
+    "start": "tsx src/main.tsx",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fzstd": "^0.1.1",
+    "ink": "^5.2.1",
+    "ink-big-text": "^2.0.0",
+    "ink-gradient": "^3.0.0",
+    "ink-spinner": "^5.0.0",
+    "react": "^18.3.1",
+    "string-width": "^8.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^18.3.12",
+    "ink-testing-library": "^4.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
