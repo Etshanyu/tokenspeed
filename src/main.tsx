@@ -74,6 +74,7 @@ function Root(props: {
     try {
       const cache = storeRef.current ?? loadCache(path.join(props.cacheDir, 'index.json'));
       const { store, result } = await scanAll({ adapters: ADAPTERS, root: props.root, cache });
+      if (process.env.TOKENSPEED_DEBUG) console.error(`[live] rescan: records=${result.records.length} scanned=${result.scanned}`);
       storeRef.current = store;
       await saveCache(path.join(props.cacheDir, 'index.json'), store);
       setRecords(result.records);
