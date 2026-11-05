@@ -26,5 +26,5 @@ export interface SourceAdapter {
   color: string;
   available(root: string): boolean;
   discover(root: string): FileEntry[];
-  parse(root: string, file: FileEntry): TurnRecord[];
+  parse(root: string, file: FileEntry): Promise<TurnRecord[]>;
 }
