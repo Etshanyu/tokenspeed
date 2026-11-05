@@ -112,14 +112,15 @@ test('modelStats p95 uses nearest rank on per-record tps', () => {
 
 test('latestSessions sorts by last activity and totals tokens', () => {
   const recs = [
-    rec({ src: 'claude', sid: 'old', ts: 10, proj: 'proj-old', outTok: 10, inTok: 5, cacheRead: 2 }),
-    rec({ src: 'claude', sid: 'new', ts: 99, proj: 'proj-new', outTok: 8, inTok: 4, cacheRead: 1 }),
-    rec({ src: 'claude', sid: 'new', ts: 50, outTok: 2, inTok: 0, durMs: 500 }),
+    rec({ src: 'claude', sid: 'old', ts: 10, proj: 'proj-old', model: 'm-old', outTok: 10, inTok: 5, cacheRead: 2 }),
+    rec({ src: 'claude', sid: 'new', ts: 99, proj: 'proj-new', model: 'm-new', outTok: 8, inTok: 4, cacheRead: 1 }),
+    rec({ src: 'claude', sid: 'new', ts: 50, model: 'm-new-early', outTok: 2, inTok: 0, durMs: 500 }),
   ];
   const rows = latestSessions(recs, 10);
   assert.equal(rows.length, 2);
   assert.equal(rows[0].sid, 'new');
   assert.equal(rows[0].lastTs, 99);
+  assert.equal(rows[0].model, 'm-new'); // model of the most recent record
   assert.equal(rows[0].reqs, 2);
   assert.equal(rows[0].totalTok, 8 + 4 + 1 + 2); // out+in+cacheRead+out2
   assert.equal(rows[0].avgTps, (8 + 2) / 1500 * 1000);

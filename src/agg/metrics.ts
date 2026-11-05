@@ -154,6 +154,7 @@ export interface SessionRow {
   sid: string;
   src: SourceId;
   proj: string;
+  model: string;
   lastTs: number;
   outTok: number;
   totalTok: number;
@@ -173,12 +174,14 @@ export function latestSessions(records: TurnRecord[], n: number): SessionRow[] {
   for (const [, list] of bySid) {
     const last = list.reduce((m, r) => Math.max(m, r.ts), -Infinity);
     const first = list[0];
+    const latest = list.reduce((m, r) => (r.ts >= m.ts ? r : m), list[0]);
     const outTok = list.reduce((s, r) => s + r.outTok, 0);
     const activeMs = list.reduce((s, r) => s + Math.max(0, r.durMs), 0);
     rows.push({
       sid: first.sid,
       src: first.src,
       proj: first.proj,
+      model: latest.model,
       lastTs: last,
       outTok,
       totalTok: list.reduce((s, r) => s + r.inTok + r.outTok + r.cacheRead + r.cacheWrite, 0),
