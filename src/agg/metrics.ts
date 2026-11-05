@@ -157,6 +157,7 @@ export interface SessionRow {
   src: SourceId;
   proj: string;
   model: string;
+  firstTs: number;
   lastTs: number;
   outTok: number;
   totalTok: number;
@@ -184,6 +185,7 @@ export function latestSessions(records: TurnRecord[], n: number): SessionRow[] {
       src: first.src,
       proj: first.proj,
       model: latest.model,
+      firstTs: list.reduce((m, r) => Math.min(m, r.ts), Infinity),
       lastTs: last,
       outTok,
       totalTok: list.reduce((s, r) => s + r.inTok + r.outTok + r.cacheRead + r.cacheWrite, 0),

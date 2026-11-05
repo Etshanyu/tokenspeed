@@ -120,6 +120,7 @@ test('latestSessions sorts by last activity and totals tokens', () => {
   assert.equal(rows.length, 2);
   assert.equal(rows[0].sid, 'new');
   assert.equal(rows[0].lastTs, 99);
+  assert.equal(rows[0].firstTs, 50);
   assert.equal(rows[0].model, 'm-new'); // model of the most recent record
   assert.equal(rows[0].reqs, 2);
   assert.equal(rows[0].totalTok, 8 + 4 + 1 + 2); // out+in+cacheRead+out2

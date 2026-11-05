@@ -20,7 +20,9 @@ test('fmtTok compacts with one decimal, trailing zero stripped', () => {
 test('fmtDur renders human time spans', () => {
   assert.equal(fmtDur(42_000), '42s');
   assert.equal(fmtDur(87_000), '1m27s');
-  assert.equal(fmtDur(12_600_000), '3.5h');
+  assert.equal(fmtDur(60_000), '1m');
+  assert.equal(fmtDur(12_600_000), '3h30m'); // screenshot style 5h08m
+  assert.equal(fmtDur(18_000_000), '5h00m');
   assert.equal(fmtDur(190_800_000), '2d5h');
 });
 

@@ -19,7 +19,7 @@ function rec(o: Partial<TurnRecord> & { src: string; ts: number }): TurnRecord {
 const records: TurnRecord[] = [
   rec({ src: 'claude', ts: NOW - 3600_000, outTok: 400, model: 'glm-5.3' }),
   rec({ src: 'claude', ts: NOW - 1800_000, outTok: 200, model: 'glm-5.3' }),
-  rec({ src: 'codex', ts: NOW - 5400_000, outTok: 300, model: 'gpt-5.1-codex' }),
+  rec({ src: 'codex', ts: NOW - 6 * 86400_000, outTok: 300, model: 'gpt-5.1-codex' }), // 10-30: in window, ticks show October
   rec({ src: 'dsh', ts: NOW - 600_000, outTok: 150, model: 'deepseek-flash', durMs: 1000 }),
 ];
 
@@ -37,6 +37,12 @@ test('renders source cards, charts and latest activity', () => {
   assert.ok(frame.includes('MODEL VELOCITY'));
   assert.ok(frame.includes('LATEST ACTIVITY'));
   assert.ok(frame.includes('glm-5.3'));
+  // screenshot-style session table columns
+  assert.ok(frame.includes('SESSION'));
+  assert.ok(frame.includes('STARTED'));
+  assert.ok(frame.includes('LAST ACTIVE'));
+  assert.ok(frame.includes('DURATION'));
+  assert.ok(frame.includes('TOKENS'));
 });
 
 test('srcFilter restricts cards to that source', () => {
@@ -73,18 +79,22 @@ test('every frame line fits 100 columns with three sources (layout regression)',
   assert.deepEqual(offenders, []);
 });
 
-test('no ALL card: one card per registered source only', () => {
+test('no ALL row or card: exactly the screenshot card row', () => {
   const inst = render(
     <Overview records={records} now={NOW} theme={THEMES[0]} srcFilter="all" />,
   );
   const frame = stripAnsi(inst.lastFrame()!);
   inst.unmount();
-  assert.ok(!/^ALL\s*$/m.test(frame));
+  // no ALL headline, no standalone ALL card
+  assert.ok(!/^ALL/m.test(frame));
+  assert.ok(!/ALL\s+\S+\s*tok\/s/.test(frame));
   assert.ok(frame.includes('CODEX'));
   assert.ok(frame.includes('CLAUDE'));
   assert.ok(frame.includes('DSH'));
-  // aggregate still visible as a summary line
-  assert.ok(/ALL\s+\S+ tok\/s/.test(frame) || /Σ/.test(frame));
+  // screenshot card summary format: Σ <dur> · <n> tok
+  assert.ok(/Σ \S+ · \S+ tok/.test(frame));
+  // activity map carries date ticks
+  assert.ok(/10-\d\d/.test(frame));
 });
 
 test('overviewLayout sizes histogram to fit beside MODEL VELOCITY', () => {

@@ -19,16 +19,32 @@ export function fmtTok(n: number): string {
   return String(n);
 }
 
-/** 42s / 1m27s / 3.5h / 2d5h */
+/** 42s / 1m27s / 5h08m / 2d5h — screenshot duration style */
 export function fmtDur(ms: number): string {
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m${s % 60}s`;
-  const h = ms / 3_600_000;
-  if (h < 24) return stripTrailingZero(h.toFixed(1)) + 'h';
-  const d = Math.floor(h / 24);
-  return `${d}d${Math.floor(h % 24)}h`;
+  if (m < 60) return s % 60 === 0 ? `${m}m` : `${m}m${s % 60}s`;
+  if (m < 1440) {
+    const h = Math.floor(m / 60);
+    return `${h}h${String(m % 60).padStart(2, '0')}m`;
+  }
+  const d = Math.floor(m / 1440);
+  return `${d}d${Math.floor((m % 1440) / 60)}h`;
+}
+
+/** freshness suffix for the header clock: 27s / 4m05s / 1h12m / 2d */
+export function fmtAgo(ms: number): string {
+  if (ms < 60_000) return `${Math.max(0, Math.floor(ms / 1000))}s`;
+  if (ms < 3_600_000) {
+    const m = Math.floor(ms / 60_000);
+    return `${m}m${String(Math.floor((ms % 60_000) / 1000)).padStart(2, '0')}s`;
+  }
+  if (ms < 86_400_000) {
+    const h = Math.floor(ms / 3_600_000);
+    return `${h}h${String(Math.floor((ms % 3_600_000) / 60_000)).padStart(2, '0')}m`;
+  }
+  return `${Math.floor(ms / 86_400_000)}d`;
 }
 
 /** null→"—"; <100 keep 1 decimal; ≥100 integer */

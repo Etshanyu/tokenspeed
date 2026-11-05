@@ -10,7 +10,7 @@ import type { WindowKey } from '../agg/metrics.ts';
 import { Table } from './comp/Table.tsx';
 import type { Column } from './comp/Table.tsx';
 import { gaugeBar, heatStrip, histogram, sparkline } from './comp/chart.ts';
-import { fmtDur, fmtTok, fmtTps, projShort, truncateToWidth, displayWidth } from '../util/fmt.ts';
+import { fmtDur, fmtTok, fmtTps, sidShort, truncateToWidth, displayWidth } from '../util/fmt.ts';
 
 export interface OverviewProps {
   records: TurnRecord[];
@@ -57,42 +57,52 @@ function useTween(target: number | null): number | null {
 }
 
 function SourceCard(props: {
-  label: string; color: string; avgTps: number | null; outTok: number;
-  activeMs: number; totalTok: number; reqs: number; spark: number[]; theme: Theme;
+  label: string; color: string; avgTps: number | null;
+  activeMs: number; totalTok: number; spark: number[]; theme: Theme;
 }): React.ReactElement {
   const tps = useTween(props.avgTps);
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={props.color} paddingX={1} minWidth={26}>
-      <Text bold color={props.color}>{props.label}</Text>
-      <Text>
-        <Text bold color={props.theme.text}>{fmtTps(tps)}</Text>
-        <Text color={props.theme.dim}> tok/s</Text>
-      </Text>
-      <Text color={props.theme.dim}>Σ {fmtTok(props.outTok)} out · {fmtDur(props.activeMs)} active</Text>
-      <Text color={props.theme.dim}>{fmtTok(props.totalTok)} tok · {props.reqs} reqs</Text>
-      <Text>{sparkline(props.spark, 22, props.color)}</Text>
+      <Box justifyContent="space-between">
+        <Text bold color={props.color}>{props.label}</Text>
+        <Text>
+          <Text bold color={props.theme.text}>{fmtTps(tps)}</Text>
+          <Text color={props.theme.dim}> tok/s</Text>
+        </Text>
+      </Box>
+      <Text color={props.theme.dim}>Σ {fmtDur(props.activeMs)} · {fmtTok(props.totalTok)} tok</Text>
+      {histogram([{ values: props.spark, color: props.color }], 22, 2).map((line, i) => (
+        <Text key={i}>{line}</Text>
+      ))}
     </Box>
   );
 }
 
 interface SessionDisplayRow {
-  time: string; src: string; proj: string; model: string; out: string; tps: string; reqs: number; recent: boolean;
+  sid: string; started: string; lastActive: string; dur: string;
+  tps: string; tokens: string; src: string; recent: boolean;
 }
 
 const sessionColumns: Column<SessionDisplayRow>[] = [
-  { key: 'time', header: 'TIME', width: 11, render: (r) => r.time },
+  { key: 'sid', header: 'SESSION', width: 10, render: (r) => r.sid },
+  { key: 'started', header: 'STARTED', width: 13, render: (r) => r.started },
+  { key: 'lastActive', header: 'LAST ACTIVE', width: 13, render: (r) => r.lastActive },
+  { key: 'dur', header: 'DURATION', width: 8, align: 'r', render: (r) => r.dur },
+  { key: 'tps', header: 'TOK·S', width: 8, align: 'r', render: (r) => r.tps },
+  { key: 'tokens', header: 'TOKENS', width: 9, align: 'r', render: (r) => r.tokens },
   { key: 'src', header: 'SRC', width: 7, render: (r) => r.src.toUpperCase() },
-  { key: 'proj', header: 'PROJECT', width: 14, render: (r) => projShort(r.proj) },
-  { key: 'model', header: 'MODEL', width: 16, render: (r) => r.model },
-  { key: 'out', header: 'OUT', width: 7, align: 'r', render: (r) => fmtTok(r.out === '—' ? 0 : Number(r.out)) },
-  { key: 'tps', header: 'AVG TKS', width: 7, align: 'r', render: (r) => r.tps },
-  { key: 'reqs', header: 'REQS', width: 4, align: 'r', render: (r) => String(r.reqs) },
 ];
 
-function fmtTime(ts: number, now: number): string {
+function fmtTime(ts: number): string {
   const d = new Date(ts);
   const p = (x: number) => String(x).padStart(2, '0');
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function fmtDate(ts: number): string {
+  const d = new Date(ts);
+  const p = (x: number) => String(x).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 export function Overview(props: OverviewProps): React.ReactElement {
@@ -102,20 +112,16 @@ export function Overview(props: OverviewProps): React.ReactElement {
 
   const filtered = applyFilters(records, srcFilter, windowRange(win, now));
   const summaries = sourceSummaries(filtered);
-  // aggregate ALL card manually
-  const outTokAll = filtered.reduce((s, r) => s + r.outTok, 0);
-  const activeAll = filtered.reduce((s, r) => s + Math.max(0, r.durMs), 0);
-  const totalAll = filtered.reduce((s, r) => s + r.inTok + r.outTok + r.cacheRead + r.cacheWrite, 0);
 
-  // one card per source (screenshot layout); the aggregate lives in the headline above
+  // one card per source (screenshot layout), no aggregate headline
   const cards: React.ReactElement[] = [];
   for (const s of summaries) {
     const adapter = ADAPTERS.find((a) => a.id === s.src);
     cards.push(
       <SourceCard key={s.src} label={adapter?.label ?? s.src} color={theme.srcColors[s.src] ?? theme.accent}
-        avgTps={s.avgTps} outTok={s.outTok} activeMs={s.activeMs}
+        avgTps={s.avgTps} activeMs={s.activeMs}
         totalTok={s.inTok + s.outTok + s.cacheRead + s.cacheWrite}
-        reqs={s.reqs} spark={s.spark} theme={theme} />,
+        spark={s.spark} theme={theme} />,
     );
   }
 
@@ -138,25 +144,22 @@ export function Overview(props: OverviewProps): React.ReactElement {
 
   const sessions = latestSessions(filtered, 8);
   const rows: SessionDisplayRow[] = sessions.map((s) => ({
-    time: fmtTime(s.lastTs, now),
-    src: s.src,
-    proj: s.proj,
-    model: s.model,
-    out: String(s.outTok),
+    sid: sidShort(s.sid),
+    started: fmtTime(s.firstTs),
+    lastActive: fmtTime(s.lastTs),
+    dur: fmtDur(s.lastTs - s.firstTs),
     tps: fmtTps(s.avgTps),
-    reqs: s.reqs,
+    tokens: fmtTok(s.totalTok),
+    src: s.src,
     recent: now - s.lastTs < 86400_000,
   }));
 
+  // time ticks under the activity strips (screenshot: start / mid / end dates)
+  const tickFrom = Number.isFinite(minTs) ? minTs : now - 7 * 86400_000;
+  const tickTo = Number.isFinite(maxTs) ? maxTs : now;
+
   return (
     <Box flexDirection="column">
-      {cards.length > 0 && (
-        <Text>
-          <Text bold color={theme.accent}>ALL </Text>
-          <Text bold color={theme.text}>{fmtTps(activeAll > 0 ? (outTokAll / activeAll) * 1000 : null)} tok/s</Text>
-          <Text color={theme.dim}> · Σ {fmtTok(outTokAll)} out · {fmtTok(totalAll)} tok · {filtered.length} reqs</Text>
-        </Text>
-      )}
       {cards.length > 0 ? (
         <Box columnGap={1}>{cards}</Box>
       ) : (
@@ -174,6 +177,13 @@ export function Overview(props: OverviewProps): React.ReactElement {
           </Box>
         ))}
         {summaries.length === 0 && <Text color={theme.dim}>—</Text>}
+        {summaries.length > 0 && (
+          <Box>
+            <Text color={theme.dim}>{' '.repeat(8)}{fmtDate(tickFrom)}</Text>
+            <Text color={theme.dim}>{' '.repeat(Math.max(1, Math.floor(stripWidth / 2) - 5))}{fmtDate((tickFrom + tickTo) / 2)}</Text>
+            <Text color={theme.dim}>{' '.repeat(Math.max(1, stripWidth - 11))}{fmtDate(tickTo)}</Text>
+          </Box>
+        )}
       </Box>
 
       <Box columnGap={2} marginTop={1}>
@@ -214,7 +224,7 @@ export function Overview(props: OverviewProps): React.ReactElement {
         <Text bold color={theme.text}>LATEST ACTIVITY</Text>
         <Table
           columns={sessionColumns.map((c) =>
-            c.key === 'time' ? { ...c, color: (r: SessionDisplayRow) => (r.recent ? theme.accent : undefined) } : c,
+            c.key === 'lastActive' ? { ...c, color: (r: SessionDisplayRow) => (r.recent ? theme.accent : undefined) } : c,
           )}
           rows={rows}
         />

@@ -74,7 +74,7 @@ test('app shell renders banner, nav, filters, status bar', () => {
   inst.unmount(); // release the stdin listener so the runner can exit
   // banner: compact one-line header with gradient TOKEN SPEED + subtitle
   assert.ok(frame.includes('observatory'));
-  assert.ok(frame.includes('codex + claude + dsh'));
+  assert.ok(frame.includes('Codex + Claude + DSH')); // capitalized like the screenshot
   assert.ok(/TOKEN SPEED/.test(frame));
   assert.ok(frame.includes('[F1] Overview'));
   assert.ok(frame.includes('[F2] Timeline'));

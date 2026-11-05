@@ -6,6 +6,7 @@ import { ADAPTERS, filterKeys } from '../sources/index.ts';
 import { THEMES } from '../theme.ts';
 import type { SourceId, TurnRecord } from '../sources/types.ts';
 import type { WindowKey } from '../agg/metrics.ts';
+import { fmtAgo } from '../util/fmt.ts';
 import { ALL_PAGES, cyclePage, enableRawMode, parseKey } from './keys.ts';
 import type { KeyAction, Page } from './keys.ts';
 import { Overview } from './Overview.tsx';
@@ -80,7 +81,12 @@ export interface AppProps {
 function clock(now: number): string {
   const d = new Date(now);
   const p = (x: number) => String(x).padStart(2, '0');
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** CODEX -> Codex, DSH stays DSH (short acronyms) */
+function prettyLabel(label: string): string {
+  return label.length <= 3 ? label : label[0] + label.slice(1).toLowerCase();
 }
 
 export function App(props: AppProps): React.ReactElement {
@@ -151,12 +157,14 @@ export function App(props: AppProps): React.ReactElement {
       <Box flexDirection="row" justifyContent="space-between">
         <Box flexDirection="column">
           {banner}
-          <Text color={theme.dim}>{adapters.map((a) => a.label.toLowerCase()).join(' + ')} · local token telemetry</Text>
+          <Text color={theme.dim}>{adapters.map((a) => prettyLabel(a.label)).join(' + ')} · local token telemetry</Text>
         </Box>
         <Box flexDirection="column" alignItems="flex-end">
           <Text color={live ? theme.accent : theme.dim}>{live ? '● LIVE' : '○ paused'}</Text>
-          <Text color={theme.dim}>node · v0.1.0</Text>
-          <Text color={theme.dim}>{clock(now)}</Text>
+          <Text color={theme.dim}>node · v0.1.0 · {clock(now)}</Text>
+          {props.lastRefresh !== undefined && (
+            <Text color={theme.dim}>data {fmtAgo(Math.max(0, now - props.lastRefresh))} ago</Text>
+          )}
         </Box>
       </Box>
 
@@ -170,13 +178,20 @@ export function App(props: AppProps): React.ReactElement {
 
       <Box columnGap={2}>
         <Text color={theme.dim}>
-          SOURCE {fKeys.map((f) => {
-            const label = f.src === 'all' ? 'All' : (adapters.find((a) => a.id === f.src)?.label ?? f.src);
+          SOURCE ({fKeys.map((f) => {
+            const label = f.src === 'all' ? 'All' : prettyLabel(adapters.find((a) => a.id === f.src)?.label ?? f.src);
             return `${f.key} ${label}`;
-          }).join(' · ')}
+          }).join(', ')})
         </Text>
         <Text color={theme.dim}>
-          WINDOW t Today · w cycle · a All &gt; <Text bold color={theme.text}>{winLabel[state.win]}</Text>
+          WINDOW ({(['today', '7d', '30d', 'all'] as WindowKey[]).map((w, i) => (
+            <React.Fragment key={w}>
+              {i > 0 ? ', ' : ''}
+              <Text bold={w === state.win} color={w === state.win ? theme.text : theme.dim}>
+                {winLabel[w]}
+              </Text>
+            </React.Fragment>
+          ))})
         </Text>
       </Box>
 
