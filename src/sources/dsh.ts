@@ -11,6 +11,10 @@ export const dshAdapter: SourceAdapter = {
     return existsSync(path.join(root, '.dsh', 'storages', 'session_projcache', 'sessions'));
   },
 
+  watchDirs(root: string): string[] {
+    return [path.join(root, '.dsh', 'storages')];
+  },
+
   discover(root: string): FileEntry[] {
     const base = path.join(root, '.dsh', 'storages', 'session_projcache', 'sessions');
     if (!existsSync(base)) return [];

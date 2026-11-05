@@ -7,7 +7,7 @@ import { ADAPTERS, filterKeys } from '../sources/index.ts';
 import { THEMES } from '../theme.ts';
 import type { SourceId, TurnRecord } from '../sources/types.ts';
 import type { WindowKey } from '../agg/metrics.ts';
-import { ALL_PAGES, cyclePage, parseKey } from './keys.ts';
+import { ALL_PAGES, cyclePage, enableRawMode, parseKey } from './keys.ts';
 import type { KeyAction, Page } from './keys.ts';
 import { Overview } from './Overview.tsx';
 import { Timeline } from './Timeline.tsx';
@@ -100,13 +100,17 @@ export function App(props: AppProps): React.ReactElement {
 
   const adapters = useMemo(
     () => ADAPTERS.filter((a) => a.available(process.env.TOKENSPEED_HOME ?? homedir())),
-    [],
+    // re-check when records change: a source dir created after startup gains its card live
+    [records],
   );
   const fKeys = useMemo(() => filterKeys(adapters), [adapters]);
 
   useEffect(() => {
     // only a real TTY carries keys; mock stdins (tests) must not hold the loop open
     if (!process.stdin.isTTY) return;
+    // raw mode is required for single-key input; Ink only enables it via useInput,
+    // which we bypass for F-key escape sequences — enable it ourselves.
+    const restoreRaw = enableRawMode(process.stdin);
     const onData = (buf: Buffer | string): void => {
       const action = parseKey(String(buf));
       if (!action) return;
@@ -128,6 +132,7 @@ export function App(props: AppProps): React.ReactElement {
     process.stdin.on('data', onData);
     return () => {
       process.stdin.off('data', onData);
+      restoreRaw?.();
     };
   }, [fKeys, props.onRefresh, props.onQuit]);
 

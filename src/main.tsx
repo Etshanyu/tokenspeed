@@ -76,9 +76,15 @@ function Root(props: {
       const { store, result } = await scanAll({ adapters: ADAPTERS, root: props.root, cache });
       if (process.env.TOKENSPEED_DEBUG) console.error(`[live] rescan: records=${result.records.length} scanned=${result.scanned}`);
       storeRef.current = store;
-      await saveCache(path.join(props.cacheDir, 'index.json'), store);
+      // persist only when something actually changed (avoid churning a ~4MB file every 5s)
+      if (result.scanned > 0) {
+        await saveCache(path.join(props.cacheDir, 'index.json'), store);
+      }
       setRecords(result.records);
       setLastRefresh(Date.now());
+    } catch (err) {
+      // infrastructure failure must not kill the TUI; next poll retries
+      if (process.env.TOKENSPEED_DEBUG) console.error('[live] rescan failed:', err);
     } finally {
       scanning.current = false;
     }
@@ -91,14 +97,10 @@ function Root(props: {
 
   useEffect(() => {
     if (!props.live) return;
-    const dirs = ADAPTERS.filter((a) => a.available(props.root)).map((a) => {
-      switch (a.id) {
-        case 'claude': return path.join(props.root, '.claude', 'projects');
-        case 'codex': return path.join(props.root, '.codex');
-        case 'dsh': return path.join(props.root, '.dsh', 'storages');
-        default: return props.root;
-      }
-    });
+    // adapter-owned watch dirs only — never watch the whole home (see SourceAdapter.watchDirs)
+    const dirs = ADAPTERS
+      .filter((a) => a.available(props.root) && a.watchDirs)
+      .flatMap((a) => a.watchDirs!(props.root));
     const stop = startWatch(dirs, () => { void rescan(); });
     const poll = setInterval(() => { void rescan(); }, 5000);
     return () => {
@@ -145,7 +147,11 @@ async function main(): Promise<void> {
       ? (values.window as WindowKey) : '7d';
     const src = ADAPTERS.some((a) => a.id === values.source) || values.source === 'all'
       ? String(values.source ?? 'all') : 'all';
-    const themeIdx = Math.max(0, THEMES.findIndex((t) => t.name === values.theme));
+    // --theme accepts a name ("vapor") or an index (1)
+    const themeArg = String(values.theme ?? '');
+    const themeIdx = /^\d+$/.test(themeArg)
+      ? Math.min(Math.max(0, parseInt(themeArg, 10)), THEMES.length - 1)
+      : Math.max(0, THEMES.findIndex((t) => t.name === themeArg));
 
     render(
       <Root

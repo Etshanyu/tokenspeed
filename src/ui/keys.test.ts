@@ -1,6 +1,30 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseKey } from './keys.ts';
+import { parseKey, enableRawMode } from './keys.ts';
+
+test('enableRawMode toggles raw mode and restores on cleanup', () => {
+  const calls: (boolean | undefined)[] = [];
+  const fakeStdin = {
+    isTTY: true,
+    isRaw: false,
+    setRawMode(v: boolean): void {
+      calls.push(v);
+      this.isRaw = v;
+    },
+  };
+  const restore = enableRawMode(fakeStdin as never);
+  assert.deepEqual(calls, [true]); // enabled immediately
+  restore?.();
+  assert.deepEqual(calls, [true, false]); // restored
+});
+
+test('enableRawMode is a no-op without TTY or setRawMode support', () => {
+  assert.equal(enableRawMode({ isTTY: false } as never), null);
+  assert.equal(
+    enableRawMode({ isTTY: true } as never), // no setRawMode function
+    null,
+  );
+});
 
 test('F1-F4 in both escape sequence dialects map to pages', () => {
   assert.deepEqual(parseKey('\x1bOP'), { t: 'page', p: 'overview' });

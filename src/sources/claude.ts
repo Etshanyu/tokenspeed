@@ -44,6 +44,10 @@ export const claudeAdapter: SourceAdapter = {
     return existsSync(path.join(root, '.claude', 'projects'));
   },
 
+  watchDirs(root: string): string[] {
+    return [path.join(root, '.claude', 'projects')];
+  },
+
   discover(root: string): FileEntry[] {
     const base = path.join(root, '.claude', 'projects');
     if (!existsSync(base)) return [];

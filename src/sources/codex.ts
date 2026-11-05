@@ -51,6 +51,13 @@ export const codexAdapter: SourceAdapter = {
     return existsSync(path.join(root, '.codex'));
   },
 
+  watchDirs(root: string): string[] {
+    return [
+      path.join(root, '.codex', 'sessions'),
+      path.join(root, '.codex', 'archived_sessions'),
+    ];
+  },
+
   discover(root: string): FileEntry[] {
     const base = path.join(root, '.codex');
     if (!existsSync(base)) return [];

@@ -123,3 +123,14 @@ test('adapter availability is per-source on a partial root', async () => {
   assert.equal(ADAPTERS.find((a) => a.id === 'codex')!.available(root), false);
   assert.equal(ADAPTERS.find((a) => a.id === 'dsh')!.available(root), true);
 });
+
+test('every adapter exposes its own watch dirs (no whole-home watching)', () => {
+  for (const a of ADAPTERS) {
+    const dirs = a.watchDirs?.(root) ?? [];
+    assert.ok(dirs.length > 0, `${a.id} must declare watchDirs`);
+    for (const d of dirs) {
+      assert.ok(!d.endsWith(root.replaceAll('\\', '/').split('/').pop()!) || d !== root, `${a.id} must not watch the whole home`);
+      assert.ok(d.length > root.length, `${a.id} watch dir must be below root`);
+    }
+  }
+});

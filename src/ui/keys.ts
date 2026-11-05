@@ -54,3 +54,25 @@ export function cyclePage(p: Page, dir: 1 | -1): Page {
 }
 
 export const ALL_PAGES = PAGES;
+
+interface RawModeStdin {
+  isTTY?: boolean;
+  setRawMode?(v: boolean): unknown;
+}
+
+/**
+ * Ink only enables raw mode via useInput/useFocus; our custom stdin listener
+ * must switch the terminal to raw mode itself or keys arrive line-buffered.
+ * Returns a restore function, or null when raw mode is unavailable.
+ */
+export function enableRawMode(stdin: RawModeStdin): (() => void) | null {
+  if (!stdin.isTTY || typeof stdin.setRawMode !== 'function') return null;
+  stdin.setRawMode(true);
+  return () => {
+    try {
+      stdin.setRawMode!(false);
+    } catch {
+      // stream already destroyed
+    }
+  };
+}

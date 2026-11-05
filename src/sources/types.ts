@@ -27,4 +27,6 @@ export interface SourceAdapter {
   available(root: string): boolean;
   discover(root: string): FileEntry[];
   parse(root: string, file: FileEntry): Promise<TurnRecord[]>;
+  /** Data directories to watch for LIVE updates. Adapters must NOT return the whole home. */
+  watchDirs?(root: string): string[];
 }
