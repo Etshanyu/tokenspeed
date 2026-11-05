@@ -5,10 +5,14 @@ import BigText from 'ink-big-text';
 import { homedir } from 'node:os';
 import { ADAPTERS, filterKeys } from '../sources/index.ts';
 import { THEMES } from '../theme.ts';
-import type { TurnRecord } from '../sources/types.ts';
+import type { SourceId, TurnRecord } from '../sources/types.ts';
 import type { WindowKey } from '../agg/metrics.ts';
 import { ALL_PAGES, cyclePage, parseKey } from './keys.ts';
 import type { KeyAction, Page } from './keys.ts';
+import { Overview } from './Overview.tsx';
+import { Timeline } from './Timeline.tsx';
+import { Models } from './Models.tsx';
+import { Requests } from './Requests.tsx';
 
 export interface AppState {
   page: Page;
@@ -71,6 +75,7 @@ export interface AppProps {
   now?: number;
   onRefresh?: () => void;
   onQuit?: () => void;
+  initial?: { srcFilter?: string; win?: WindowKey; themeIdx?: number };
 }
 
 function clock(now: number): string {
@@ -81,7 +86,14 @@ function clock(now: number): string {
 
 export function App(props: AppProps): React.ReactElement {
   const { records, live = false, now = Date.now() } = props;
-  const [state, dispatch] = useReducer(appReducer, initialState());
+  const [state, dispatch] = useReducer(appReducer, undefined, () => ({
+    ...initialState(),
+    ...(props.initial?.srcFilter !== undefined ? { srcFilter: props.initial.srcFilter } : {}),
+    ...(props.initial?.win !== undefined ? { win: props.initial.win } : {}),
+    ...(props.initial?.themeIdx !== undefined && props.initial.themeIdx >= 0
+      ? { themeIdx: props.initial.themeIdx }
+      : {}),
+  }));
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 80;
   const theme = THEMES[state.themeIdx % THEMES.length];
@@ -165,7 +177,23 @@ export function App(props: AppProps): React.ReactElement {
       </Box>
 
       <Box borderStyle="round" borderColor={theme.border} flexDirection="column" paddingX={1}>
-        <Text color={theme.text} dimColor>page: {state.page} (implemented in later tasks)</Text>
+        {state.page === 'overview' && (
+          <Overview records={records} now={now} theme={theme} srcFilter={state.srcFilter as SourceId | 'all'} win={state.win} />
+        )}
+        {state.page === 'timeline' && (
+          <Timeline records={records} now={now} theme={theme} srcFilter={state.srcFilter as SourceId | 'all'} win={state.win} />
+        )}
+        {state.page === 'models' && (
+          <Models
+            records={records} now={now} theme={theme}
+            srcFilter={state.srcFilter as SourceId | 'all'} win={state.win}
+            sort={{ col: state.sortCol, dir: state.sortDir }}
+            onSort={() => { /* keyboard-driven via reducer */ }}
+          />
+        )}
+        {state.page === 'requests' && (
+          <Requests records={records} now={now} theme={theme} srcFilter={state.srcFilter as SourceId | 'all'} win={state.win} scroll={state.scroll} />
+        )}
       </Box>
 
       <Box justifyContent="space-between">

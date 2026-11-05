@@ -69,13 +69,13 @@ interface SessionDisplayRow {
 }
 
 const sessionColumns: Column<SessionDisplayRow>[] = [
-  { key: 'time', header: 'TIME', width: 10, render: (r) => r.time },
+  { key: 'time', header: 'TIME', width: 11, render: (r) => r.time },
   { key: 'src', header: 'SRC', width: 7, render: (r) => r.src.toUpperCase() },
-  { key: 'proj', header: 'PROJECT', width: 22, render: (r) => projShort(r.proj) },
-  { key: 'model', header: 'MODEL', width: 20, render: (r) => r.model },
-  { key: 'out', header: 'OUT', width: 8, align: 'r', render: (r) => fmtTok(r.out === '—' ? 0 : Number(r.out)) },
-  { key: 'tps', header: 'AVG TKS', width: 8, align: 'r', render: (r) => r.tps },
-  { key: 'reqs', header: 'REQS', width: 5, align: 'r', render: (r) => String(r.reqs) },
+  { key: 'proj', header: 'PROJECT', width: 14, render: (r) => projShort(r.proj) },
+  { key: 'model', header: 'MODEL', width: 16, render: (r) => r.model },
+  { key: 'out', header: 'OUT', width: 7, align: 'r', render: (r) => fmtTok(r.out === '—' ? 0 : Number(r.out)) },
+  { key: 'tps', header: 'AVG TKS', width: 7, align: 'r', render: (r) => r.tps },
+  { key: 'reqs', header: 'REQS', width: 4, align: 'r', render: (r) => String(r.reqs) },
 ];
 
 function fmtTime(ts: number, now: number): string {
