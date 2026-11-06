@@ -6,6 +6,19 @@ Token Speed is a read-only, offline TUI for inspecting output-token usage and th
 
 > **Status:** early open-source release (`0.1.x`). Upstream log formats may change. Read the metric definitions below before comparing speeds across tools.
 
+## Screenshots
+
+Real captures of the Python runtime in Windows Terminal; all values come from local telemetry.
+
+![TokenSpeed overview in Windows Terminal](docs/assets/tokenspeed-overview.png)
+
+<details>
+<summary>View the model statistics screen</summary>
+
+![TokenSpeed model statistics in Windows Terminal](docs/assets/tokenspeed-models.png)
+
+</details>
+
 ## Highlights
 
 - **Local-first:** no network service, account, API key or telemetry upload.
