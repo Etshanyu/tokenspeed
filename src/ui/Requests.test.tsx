@@ -32,8 +32,10 @@ test('requests renders newest first with headers', () => {
   inst.unmount();
   assert.ok(frame.includes('REQUESTS'));
   assert.ok(frame.includes('SESSION'));
-  assert.ok(frame.includes('showing 1-'));
-  assert.ok(frame.includes('of 12'));
+  assert.ok(frame.includes('DURATION'));
+  assert.ok(frame.includes('SHOWING 1-10 / 12'));
+  assert.ok(frame.includes('newest first'));
+  assert.ok(frame.includes('TPS = output tokens / second'));
   // newest (index 11) on top; the 10th newest (index 2) is the last visible row;
   // the two oldest are scrolled out of the 10-row window
   assert.ok(frame.indexOf(timeOf(11)) < frame.indexOf(timeOf(2)));
@@ -48,7 +50,7 @@ test('scroll window slices rows and updates the range line', () => {
   inst.unmount();
   assert.ok(frame.includes(timeOf(9)));  // third newest now on top
   assert.ok(!frame.includes(timeOf(11)));
-  assert.ok(frame.includes('showing 3-12 of 12'));
+  assert.ok(frame.includes('SHOWING 3-12 / 12'));
 });
 
 test('bottom sentinel scroll clamps to last page', () => {
@@ -57,7 +59,7 @@ test('bottom sentinel scroll clamps to last page', () => {
   );
   const frame = inst.lastFrame()!;
   inst.unmount();
-  assert.ok(frame.includes('showing 3-12 of 12'));
+  assert.ok(frame.includes('SHOWING 3-12 / 12'));
   assert.ok(frame.includes(timeOf(0)));
 });
 
@@ -78,5 +80,5 @@ test('srcFilter hides other sources', () => {
   inst.unmount();
   assert.ok(frame.includes('CODEX'));
   assert.ok(!frame.includes('CLAUDE'));
-  assert.ok(frame.includes('of 6'));
+  assert.ok(frame.includes('/ 6'));
 });

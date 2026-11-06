@@ -67,7 +67,11 @@ interface RawModeStdin {
  */
 export function enableRawMode(stdin: RawModeStdin): (() => void) | null {
   if (!stdin.isTTY || typeof stdin.setRawMode !== 'function') return null;
-  stdin.setRawMode(true);
+  try {
+    stdin.setRawMode(true);
+  } catch {
+    return null;
+  }
   return () => {
     try {
       stdin.setRawMode!(false);

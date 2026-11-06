@@ -1,16 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, Text, useStdout } from 'ink';
+import BigText from 'ink-big-text';
 import { ADAPTERS } from '../sources/index.ts';
 import type { SourceId, TurnRecord } from '../sources/types.ts';
 import type { Theme } from '../theme.ts';
 import {
-  applyFilters, buckets, latestSessions, modelStats, sourceSummaries, windowRange,
+  applyFilters, buckets, modelStats, sourceSummaries, windowRange,
 } from '../agg/metrics.ts';
-import type { WindowKey } from '../agg/metrics.ts';
-import { Table } from './comp/Table.tsx';
-import type { Column } from './comp/Table.tsx';
-import { gaugeBar, heatStrip, histogram, sparkline } from './comp/chart.ts';
-import { fmtDur, fmtTok, fmtTps, sidShort, truncateToWidth, displayWidth } from '../util/fmt.ts';
+import type { SourceSummary, WindowKey } from '../agg/metrics.ts';
+import { activityStrip, gradientBar, histogram, sparkline } from './comp/chart.ts';
+import { fmtDur, fmtPct, fmtTok, truncateToWidth, displayWidth } from '../util/fmt.ts';
 
 export interface OverviewProps {
   records: TurnRecord[];
@@ -20,18 +19,28 @@ export interface OverviewProps {
   win?: WindowKey;
 }
 
-/** Width planner: histogram buckets must fit beside MODEL VELOCITY inside the bordered panel. */
-export function overviewLayout(width: number, nSeries: number): { histBuckets: number; velocityWidth: number } {
-  const velocityWidth = 54; // 22 model + 1 + 24 gauge + 1 + 6 tps
-  const content = width - 6; // box border (2) + padding (2) + safety (2)
-  const avail = Math.max(6, content - velocityWidth - 2);
+export function overviewLayout(width: number, nSources: number): {
+  cardWidth: number;
+  leftWidth: number;
+  rightWidth: number;
+  activityWidth: number;
+  velocityWidth: number;
+} {
+  const count = Math.max(1, nSources);
+  const lowerGap = 2;
+  const leftWidth = Math.floor(((width - lowerGap) * 2) / 3);
+  const rightWidth = Math.max(20, width - lowerGap - leftWidth);
+  const leftContent = Math.max(12, leftWidth - 4);
   return {
-    velocityWidth,
-    histBuckets: Math.max(4, Math.floor(avail / Math.max(1, nSeries))),
+    cardWidth: Math.max(12, Math.floor((width - Math.max(0, count - 1)) / count)),
+    leftWidth,
+    rightWidth,
+    activityWidth: Math.max(4, leftContent - 8),
+    velocityWidth: Math.max(12, rightWidth - 4),
   };
 }
 
-/** 2-step value tween: enough motion to notice, not enough to flicker */
+/** Two short steps keep live values readable without visible flicker. */
 function useTween(target: number | null): number | null {
   const [display, setDisplay] = useState<number | null>(target);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -56,53 +65,93 @@ function useTween(target: number | null): number | null {
   return display;
 }
 
+function fmtRate(value: number | null): string {
+  return value === null || !Number.isFinite(value) ? '—' : value.toFixed(1);
+}
+
+function fmtMetricTok(value: number): string {
+  return fmtTok(value).replace(/k$/, 'K');
+}
+
+function fit(value: string, width: number, align: 'l' | 'r' = 'l'): string {
+  const text = truncateToWidth(value, Math.max(1, width));
+  const padding = ' '.repeat(Math.max(0, width - displayWidth(text)));
+  return align === 'r' ? padding + text : text + padding;
+}
+
+function prettySource(src: string): string {
+  return src.length <= 3 ? src.toUpperCase() : src[0].toUpperCase() + src.slice(1).toLowerCase();
+}
+
+const compactBigText = { spaceless: true };
+
 function SourceCard(props: {
-  label: string; color: string; avgTps: number | null;
-  activeMs: number; totalTok: number; spark: number[]; theme: Theme;
+  summary: SourceSummary;
+  label: string;
+  color: string;
+  theme: Theme;
+  width: number;
 }): React.ReactElement {
-  const tps = useTween(props.avgTps);
+  const { summary, color, theme, width } = props;
+  const tps = useTween(summary.avgTps);
+  const chartWidth = Math.max(4, width - 4);
+  const wide = width >= 42;
+  const fullHeader = width >= 32;
+  const usable = Math.round(summary.usablePct * 100);
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={props.color} paddingX={1} minWidth={26}>
-      <Box justifyContent="space-between">
-        <Text bold color={props.color}>{props.label}</Text>
-        <Text>
-          <Text bold color={props.theme.text}>{fmtTps(tps)}</Text>
-          <Text color={props.theme.dim}> tok/s</Text>
-        </Text>
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={color}
+      borderDimColor
+      paddingX={1}
+      flexGrow={1}
+      flexBasis={0}
+      minWidth={0}
+    >
+      <Text bold color={color}>
+        {props.label.toUpperCase()}{' '}
+        <Text color={theme.dim}>{fullHeader ? 'weighted request throughput' : 'weighted throughput'}</Text>
+      </Text>
+      {tps === null ? (
+        <Text bold color={color}>—</Text>
+      ) : (
+        <BigText
+          text={fmtRate(tps)}
+          font={width >= 48 ? 'block' : 'tiny'}
+          colors={[color]}
+          lineHeight={0}
+          letterSpacing={1}
+          {...compactBigText}
+        />
+      )}
+      <Text color={theme.dim}>{wide ? 'estimated output tokens / second' : 'output tokens / second'}</Text>
+      <Text color={theme.text}>Median {fmtRate(summary.medianTps)} <Text color={theme.dim}>· {summary.reqs} requests</Text></Text>
+      <Text color={theme.dim}>
+        {wide
+          ? `${fmtMetricTok(summary.outTok)} output tokens · ${usable}% usable timing`
+          : `${fmtMetricTok(summary.outTok)} output · ${usable}% usable`}
+      </Text>
+      <Box marginTop={1} flexDirection="column">
+        {histogram([{ values: summary.spark, color }], chartWidth, 3).map((line, i) => (
+          <Text key={i}>{line}</Text>
+        ))}
       </Box>
-      <Text color={props.theme.dim}>Σ {fmtDur(props.activeMs)} · {fmtTok(props.totalTok)} tok</Text>
-      {histogram([{ values: props.spark, color: props.color }], 22, 2).map((line, i) => (
-        <Text key={i}>{line}</Text>
-      ))}
     </Box>
   );
 }
 
-interface SessionDisplayRow {
-  sid: string; started: string; lastActive: string; dur: string;
-  tps: string; tokens: string; src: string; recent: boolean;
-}
-
-const sessionColumns: Column<SessionDisplayRow>[] = [
-  { key: 'sid', header: 'SESSION', width: 10, render: (r) => r.sid },
-  { key: 'started', header: 'STARTED', width: 13, render: (r) => r.started },
-  { key: 'lastActive', header: 'LAST ACTIVE', width: 13, render: (r) => r.lastActive },
-  { key: 'dur', header: 'DURATION', width: 8, align: 'r', render: (r) => r.dur },
-  { key: 'tps', header: 'TOK·S', width: 8, align: 'r', render: (r) => r.tps },
-  { key: 'tokens', header: 'TOKENS', width: 9, align: 'r', render: (r) => r.tokens },
-  { key: 'src', header: 'SRC', width: 7, render: (r) => r.src.toUpperCase() },
-];
-
-function fmtTime(ts: number): string {
+function fmtActivityDate(ts: number): string {
   const d = new Date(ts);
   const p = (x: number) => String(x).padStart(2, '0');
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}h`;
 }
 
-function fmtDate(ts: number): string {
+function fmtRequestTime(ts: number, compact: boolean): string {
   const d = new Date(ts);
   const p = (x: number) => String(x).padStart(2, '0');
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  const base = `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return compact ? base : `${base}:${p(d.getSeconds())}`;
 }
 
 export function Overview(props: OverviewProps): React.ReactElement {
@@ -111,123 +160,180 @@ export function Overview(props: OverviewProps): React.ReactElement {
   const width = stdout?.columns ?? 100;
 
   const filtered = applyFilters(records, srcFilter, windowRange(win, now));
-  const summaries = sourceSummaries(filtered);
+  const summaries = sourceSummaries(filtered).sort((a, b) => {
+    const ai = ADAPTERS.findIndex((adapter) => adapter.id === a.src);
+    const bi = ADAPTERS.findIndex((adapter) => adapter.id === b.src);
+    return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
+  });
+  const layout = overviewLayout(width, Math.max(1, summaries.length));
 
-  // one card per source (screenshot layout), no aggregate headline
-  const cards: React.ReactElement[] = [];
-  for (const s of summaries) {
-    const adapter = ADAPTERS.find((a) => a.id === s.src);
-    cards.push(
-      <SourceCard key={s.src} label={adapter?.label ?? s.src} color={theme.srcColors[s.src] ?? theme.accent}
-        avgTps={s.avgTps} activeMs={s.activeMs}
-        totalTok={s.inTok + s.outTok + s.cacheRead + s.cacheWrite}
-        spark={s.spark} theme={theme} />,
-    );
-  }
-
-  const stripWidth = Math.max(20, Math.min(60, width - 22));
-  const models = modelStats(filtered).slice(0, 5);
-  let maxTps = 1;
-  for (const m of models) maxTps = Math.max(maxTps, m.avgTps ?? 0);
-
-  const histSources = [...new Set(filtered.map((r) => r.src))];
-  let minTs = Infinity, maxTs = -Infinity;
+  let minTs = Infinity;
+  let maxTs = -Infinity;
   for (const r of filtered) {
-    if (r.ts < minTs) minTs = r.ts;
-    if (r.ts > maxTs) maxTs = r.ts;
+    minTs = Math.min(minTs, r.ts);
+    maxTs = Math.max(maxTs, r.ts);
   }
-  const range = Number.isFinite(minTs)
-    ? { from: minTs, to: maxTs + 1 }
-    : { from: now - 86400_000, to: now };
-  const { histBuckets } = overviewLayout(width, Math.max(1, histSources.length));
-  const histBs = buckets(filtered, range, histBuckets);
+  const selectedRange = windowRange(win, now);
+  const range = win === 'all'
+    ? Number.isFinite(minTs)
+      ? { from: minTs, to: maxTs + 1 }
+      : { from: now - 86400_000, to: now }
+    : selectedRange;
+  const activityBarWidth = Math.max(4, layout.activityWidth - 9);
+  const histBs = buckets(filtered, range, activityBarWidth);
+  const histSources = summaries.map((s) => s.src);
+  const activityPeak = Math.max(
+    1,
+    ...histBs.flatMap((bucket) => histSources.map((src) => bucket.out[src] ?? 0)),
+  );
+  const bucketMs = Math.max(1, (range.to - range.from) / activityBarWidth);
+  const bucketLabel = bucketMs >= 86400_000
+    ? `${(bucketMs / 86400_000).toFixed(1)}d`
+    : bucketMs >= 3600_000
+      ? `${(bucketMs / 3600_000).toFixed(1)}h`
+      : `${Math.max(1, Math.round(bucketMs / 60_000))}m`;
 
-  const sessions = latestSessions(filtered, 8);
-  const rows: SessionDisplayRow[] = sessions.map((s) => ({
-    sid: sidShort(s.sid),
-    started: fmtTime(s.firstTs),
-    lastActive: fmtTime(s.lastTs),
-    dur: fmtDur(s.lastTs - s.firstTs),
-    tps: fmtTps(s.avgTps),
-    tokens: fmtTok(s.totalTok),
-    src: s.src,
-    recent: now - s.lastTs < 86400_000,
-  }));
+  const models = modelStats(filtered)
+    .sort((a, b) => b.outTok - a.outTok)
+    .slice(0, 3);
+  let maxModelOutput = 1;
+  for (const m of models) maxModelOutput = Math.max(maxModelOutput, m.outTok);
 
-  // time ticks under the activity strips (screenshot: start / mid / end dates)
-  const tickFrom = Number.isFinite(minTs) ? minTs : now - 7 * 86400_000;
-  const tickTo = Number.isFinite(maxTs) ? maxTs : now;
+  const latest = [...filtered].sort((a, b) => b.ts - a.ts).slice(0, 4);
+  const sessionCount = new Set(filtered.map((r) => `${r.src}:${r.sid}`)).size;
+  const modelCount = new Set(filtered.map((r) => r.model)).size;
+  const outputTotal = filtered.reduce((sum, r) => sum + r.outTok, 0);
+  const leftContent = Math.max(12, layout.leftWidth - 4);
+  const compactLatest = leftContent < 64;
+  const timeWidth = compactLatest ? 11 : 14;
+  const sourceWidth = compactLatest ? 5 : 6;
+  const durationWidth = compactLatest ? 8 : 11;
+  const outputWidth = compactLatest ? 8 : 11;
+  const latestModelWidth = Math.max(4, leftContent - timeWidth - sourceWidth - durationWidth - outputWidth - 8);
 
   return (
     <Box flexDirection="column">
-      {cards.length > 0 ? (
-        <Box columnGap={1}>{cards}</Box>
+      {summaries.length > 0 ? (
+        <Box columnGap={1} alignItems="stretch">
+          {summaries.map((summary) => {
+            const adapter = ADAPTERS.find((a) => a.id === summary.src);
+            return (
+              <SourceCard
+                key={summary.src}
+                summary={summary}
+                label={adapter?.label ?? summary.src}
+                color={theme.srcColors[summary.src] ?? theme.accent}
+                theme={theme}
+                width={layout.cardWidth}
+              />
+            );
+          })}
+        </Box>
       ) : (
         <Box borderStyle="round" borderColor={theme.border} paddingX={1}>
           <Text color={theme.dim}>no activity in window · — </Text>
         </Box>
       )}
 
-      <Box flexDirection="column" marginTop={1}>
-        <Text bold color={theme.text}>ACTIVITY MAP</Text>
-        {summaries.map((s) => (
-          <Box key={s.src} columnGap={1}>
-            <Text color={theme.srcColors[s.src] ?? theme.accent}>{(ADAPTERS.find((a) => a.id === s.src)?.label ?? s.src).padEnd(7)}</Text>
-            <Text>{heatStrip(s.spark, stripWidth, theme.heat)}</Text>
-          </Box>
-        ))}
-        {summaries.length === 0 && <Text color={theme.dim}>—</Text>}
-        {summaries.length > 0 && (
-          <Box>
-            <Text color={theme.dim}>{' '.repeat(8)}{fmtDate(tickFrom)}</Text>
-            <Text color={theme.dim}>{' '.repeat(Math.max(1, Math.floor(stripWidth / 2) - 5))}{fmtDate((tickFrom + tickTo) / 2)}</Text>
-            <Text color={theme.dim}>{' '.repeat(Math.max(1, stripWidth - 11))}{fmtDate(tickTo)}</Text>
-          </Box>
-        )}
-      </Box>
-
       <Box columnGap={2} marginTop={1}>
-        <Box flexDirection="column">
-          <Text bold color={theme.text}>MODEL VELOCITY</Text>
-          {models.map((m) => {
-            const name = truncateToWidth(m.model, 22);
-            const pad = ' '.repeat(Math.max(0, 22 - displayWidth(name)));
-            return (
-              <Box key={m.model} columnGap={1}>
-                <Text color={theme.dim}>{name}{pad}</Text>
-                <Text>{gaugeBar(m.avgTps ?? 0, maxTps, 24, '█', '░')}</Text>
-                <Text color={theme.text}>{fmtTps(m.avgTps)}</Text>
+        <Box width={layout.leftWidth} flexDirection="column" flexShrink={0}>
+          <Box borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column">
+            <Text bold color={theme.text}>ACTIVITY MAP <Text color={theme.dim}> · output tokens / time bucket</Text></Text>
+            <Text color={theme.dim}>{fmtActivityDate(range.from)} → {fmtActivityDate(range.to)} · {bucketLabel}/bucket</Text>
+            <Box columnGap={1}>
+              <Text color={theme.dim}>{fit('SOURCE', 7)}</Text>
+              <Text color={theme.dim}>{fit('BUCKET ACTIVITY', activityBarWidth)}</Text>
+              <Text color={theme.dim}>{fit('TOTAL', 8, 'r')}</Text>
+            </Box>
+            {summaries.map((s) => (
+              <Box key={s.src} columnGap={1}>
+                <Text color={theme.srcColors[s.src] ?? theme.accent}>{fit(prettySource(s.src), 7)}</Text>
+                <Text>{activityStrip(
+                  histBs.map((b) => b.out[s.src] ?? 0),
+                  activityBarWidth,
+                  theme.srcColors[s.src] ?? theme.accent,
+                  theme.border,
+                  activityPeak,
+                )}</Text>
+                <Text color={theme.text}>{fit(fmtMetricTok(s.outTok), 8, 'r')}</Text>
               </Box>
-            );
-          })}
-          {models.length === 0 && <Text color={theme.dim}>—</Text>}
+            ))}
+            {summaries.length === 0 && <Text color={theme.dim}>—</Text>}
+            <Box marginTop={1}>
+              <Text color={theme.dim}>· no output  ▁▂█ low → high · shared scale · peak {fmtMetricTok(activityPeak)}</Text>
+            </Box>
+          </Box>
+
+          <Box borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column" marginTop={1}>
+            <Text bold color={theme.text}>LATEST ACTIVITY</Text>
+            <Text color={theme.dim} wrap="truncate">
+              {sessionCount} sessions · {modelCount} models · {fmtMetricTok(outputTotal)} output tokens
+            </Text>
+            <Box marginTop={1} flexDirection="column">
+              <Text color={theme.dim}>
+                {fit('TIME', timeWidth)}{'  '}
+                {fit('SOURCE', sourceWidth)}{'  '}
+                {fit('DURATION', durationWidth)}{'  '}
+                {fit('OUTPUT', outputWidth)}{'  '}
+                {fit('MODEL', Math.max(1, latestModelWidth))}
+              </Text>
+              {latest.map((r) => {
+                const color = theme.srcColors[r.src] ?? theme.accent;
+                return (
+                  <Text key={`${r.src}:${r.sid}:${r.ts}`}>
+                    <Text color={theme.dim}>{fit(fmtRequestTime(r.ts, compactLatest), timeWidth)}</Text>{'  '}
+                    <Text color={color}>{fit(r.src, sourceWidth)}</Text>{'  '}
+                    <Text color={theme.text}>{fit(fmtDur(r.durMs), durationWidth)}</Text>{'  '}
+                    <Text color={theme.text}>{fit(`${fmtMetricTok(r.outTok)} output`, outputWidth)}</Text>{'  '}
+                    <Text color={theme.dim}>· {fit(r.model, Math.max(1, latestModelWidth - 2))}</Text>
+                  </Text>
+                );
+              })}
+              {latest.length === 0 && <Text color={theme.dim}>—</Text>}
+            </Box>
+          </Box>
         </Box>
 
-        <Box flexDirection="column">
-          <Text bold color={theme.text}>OUTPUT ACTIVITY</Text>
-          {histSources.length > 0 ? (
-            histogram(
-              histSources.map((src) => ({
-                values: histBs.map((b) => b.out[src] ?? 0),
-                color: theme.srcColors[src] ?? theme.accent,
-              })),
-              histBuckets,
-              6,
-            ).map((line, i) => <Text key={i}>{line}</Text>)
-          ) : (
-            <Text color={theme.dim}>—</Text>
-          )}
-        </Box>
-      </Box>
+        <Box width={layout.rightWidth} flexDirection="column" flexShrink={0}>
+          <Box borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column">
+            <Text bold color={theme.text}>MODEL USAGE <Text color={theme.dim}>· output / share</Text></Text>
+            {models.map((m) => {
+              const src = m.srcs[0] ?? '';
+              const color = theme.srcColors[src] ?? theme.accent;
+              const gradient = theme.srcGradients?.[src] ?? [color, theme.accent];
+              const usage = `${fmtMetricTok(m.outTok)} · ${fmtPct(m.share)}`;
+              const labelWidth = Math.max(4, layout.velocityWidth - displayWidth(usage) - 1);
+              return (
+                <Box key={`${src}:${m.model}`} flexDirection="column">
+                  <Text>
+                    <Text color={color}>{fit(`${src.toUpperCase()} ${m.model}`, labelWidth)}</Text>{' '}
+                    <Text bold color={color}>{usage}</Text>
+                  </Text>
+                  <Text>{gradientBar(m.outTok, maxModelOutput, layout.velocityWidth, gradient, theme.border)}</Text>
+                </Box>
+              );
+            })}
+            {models.length === 0 && <Text color={theme.dim}>—</Text>}
+          </Box>
 
-      <Box flexDirection="column" marginTop={1}>
-        <Text bold color={theme.text}>LATEST ACTIVITY</Text>
-        <Table
-          columns={sessionColumns.map((c) =>
-            c.key === 'lastActive' ? { ...c, color: (r: SessionDisplayRow) => (r.recent ? theme.accent : undefined) } : c,
-          )}
-          rows={rows}
-        />
+          <Box borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column" marginTop={1}>
+            <Text bold color={theme.text}>OUTPUT ACTIVITY</Text>
+            {summaries.map((s) => {
+              const color = theme.srcColors[s.src] ?? theme.accent;
+              return (
+                <Box key={s.src} flexDirection="column">
+                  <Text color={color}>{prettySource(s.src)} <Text color={theme.text}>{fmtMetricTok(s.outTok)} tokens</Text></Text>
+                  <Text>{sparkline(
+                    histBs.map((b) => b.out[s.src] ?? 0),
+                    layout.velocityWidth,
+                    color,
+                  )}</Text>
+                </Box>
+              );
+            })}
+            {histSources.length === 0 && <Text color={theme.dim}>—</Text>}
+          </Box>
+        </Box>
       </Box>
     </Box>
   );

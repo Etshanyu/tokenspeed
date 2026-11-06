@@ -89,26 +89,41 @@ function fmtLabel(ts: number, withHour: boolean): string {
     : `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
+function timelineAxis(start: string, end: string, width: number): string {
+  if (width <= 0) return '';
+  if (start.length + end.length + 1 > width) return `${start} ${end}`.slice(0, width);
+  return start + ' '.repeat(width - start.length - end.length) + end;
+}
+
+function fmtMetricTok(value: number): string {
+  return fmtTok(value).replace(/k$/, 'K');
+}
+
 export function Timeline(props: TimelineProps): React.ReactElement {
   const { records, now, theme, srcFilter, win } = props;
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 100;
 
-  const filtered = applyFilters(records, srcFilter, windowRange(win, now));
+  const selectedRange = windowRange(win, now);
+  const filtered = applyFilters(records, srcFilter, selectedRange);
   let minTs = Infinity, maxTs = -Infinity;
   for (const r of filtered) {
     if (r.ts < minTs) minTs = r.ts;
     if (r.ts > maxTs) maxTs = r.ts;
   }
-  const range = Number.isFinite(minTs)
-    ? { from: minTs, to: maxTs + 1 }
-    : windowRange(win, now);
+  const range = win === 'all'
+    ? Number.isFinite(minTs)
+      ? { from: minTs, to: maxTs + 1 }
+      : { from: now - 86400_000, to: now }
+    : selectedRange;
   // plan bucket counts: today 24 / 7d 28 / 30d 30 / all ≤40 — chart width follows, not vice versa
   const n = Math.max(4, Math.min(bucketCount(win, range.to - range.from), Math.max(10, width - 24)));
   const bs = buckets(filtered, range, n);
+  const bucketMs = (range.to - range.from) / n;
 
   const srcs = [...new Set(filtered.map((r) => r.src))];
   const series = srcs.map((src) => ({
+    src,
     values: bs.map((b) => b.out[src] ?? 0),
     color: theme.srcColors[src] ?? theme.accent,
   }));
@@ -126,26 +141,38 @@ export function Timeline(props: TimelineProps): React.ReactElement {
       peakIdx = i;
     }
   });
-  const withHour = win === 'today';
+  const withHour = bucketMs < 86400_000;
+  const bucketText = win === 'today' ? 'hourly buckets' : win === '7d' ? '6h buckets' : win === '30d' ? 'daily buckets' : 'automatic buckets';
+  const startLabel = fmtLabel(bs[0].t0, withHour);
+  const endLabel = fmtLabel(bs[bs.length - 1].t0 + bucketMs, withHour);
 
   return (
-    <Box flexDirection="column">
-      <Text bold color={theme.text}>TIMELINE · {win === 'today' ? 'hourly' : win === '7d' ? '6h buckets' : win === '30d' ? 'daily' : 'auto'}{srcFilter !== 'all' ? ` · ${srcFilter}` : ''}</Text>
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
+      <Text bold color={theme.text}>TIMELINE <Text color={theme.dim}>· output tokens / time bucket</Text></Text>
       {filtered.length === 0 ? (
-        <Box borderStyle="round" borderColor={theme.border} paddingX={1} marginY={1}>
+        <Box marginY={1}>
           <Text color={theme.dim}>no activity in window —</Text>
         </Box>
       ) : (
         <>
-          <Box flexDirection="column" marginY={0}>
+          <Text color={theme.dim}>{bucketText} · {srcFilter === 'all' ? 'all sources' : srcFilter} · {filtered.length} requests</Text>
+          <Box flexDirection="column" marginTop={1}>
             {rows.map((line, i) => <Text key={i}>{line}</Text>)}
           </Box>
-          <Text color={theme.dim}>
-            {fmtLabel(bs[0].t0, withHour).padEnd(12)}{'…'.repeat(Math.max(1, Math.floor(n / 2) - 12))}{fmtLabel(bs[bs.length - 1].t0 + (range.to - range.from) / bs.length, withHour).padStart(12)}
-          </Text>
-          <Text color={theme.dim}>
-            Σ out <Text color={theme.text}>{fmtTok(outTotal)}</Text> · in {fmtTok(inTotal)} · cache {fmtTok(cacheTotal)} · peak <Text color={theme.accent}>{fmtTok(peakVal)}</Text> @ {fmtLabel(bs[peakIdx].t0, withHour)}
-          </Text>
+          <Text color={theme.dim}>{timelineAxis(startLabel, endLabel, n)}</Text>
+          <Box columnGap={3} marginTop={1}>
+            <Text color={theme.dim}>OUTPUT <Text bold color={theme.text}>{fmtMetricTok(outTotal)}</Text></Text>
+            <Text color={theme.dim}>INPUT <Text color={theme.text}>{fmtMetricTok(inTotal)}</Text></Text>
+            <Text color={theme.dim}>CACHE READ <Text color={theme.text}>{fmtMetricTok(cacheTotal)}</Text></Text>
+          </Box>
+          <Text color={theme.dim}>PEAK <Text bold color={theme.accent}>{fmtMetricTok(peakVal)}</Text> / bucket @ {fmtLabel(bs[peakIdx].t0, withHour)}</Text>
+          <Box columnGap={2} marginTop={1}>
+            <Text color={theme.dim}>SOURCES</Text>
+            {series.map((s) => (
+              <Text key={s.src} color={s.color}>● {s.src} <Text color={theme.dim}>{fmtMetricTok(s.values.reduce((a, b) => a + b, 0))}</Text></Text>
+            ))}
+            <Text color={theme.dim}><Text color={theme.accent}>·</Text> 5-bucket trend</Text>
+          </Box>
         </>
       )}
     </Box>

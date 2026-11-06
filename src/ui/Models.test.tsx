@@ -32,6 +32,10 @@ test('models table renders rows with share and gauge', () => {
   assert.ok(frame.includes('deepseek-flash'));
   assert.ok(frame.includes('%')); // share percentages
   assert.ok(frame.includes('█')); // share gauge bars
+  assert.ok(frame.includes('AVG TPS'));
+  assert.ok(frame.includes('PEAK TPS'));
+  assert.ok(frame.includes('SORT OUTPUT'));
+  assert.ok(frame.includes('SHARE = output-token share'));
 });
 
 test('default OUT desc puts glm-5.3 first', () => {

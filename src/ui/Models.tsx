@@ -20,19 +20,23 @@ export interface ModelsProps {
 }
 
 interface DisplayRow {
-  model: string; srcs: string; reqs: number; inTok: number; outTok: number;
+  model: string; src: SourceId | undefined; srcs: string; reqs: number; inTok: number; outTok: number;
   cacheRead: number; avgTps: number | null; peakTps: number | null; share: number;
+}
+
+function fmtMetricTok(value: number): string {
+  return fmtTok(value).replace(/k$/, 'K');
 }
 
 const COLUMNS: Column<DisplayRow>[] = [
   { key: 'model', header: 'MODEL', width: 22, render: (r) => r.model },
-  { key: 'srcs', header: 'SRC', width: 8, render: (r) => r.srcs },
+  { key: 'srcs', header: 'SOURCE', width: 8, render: (r) => r.srcs },
   { key: 'reqs', header: 'REQS', width: 5, align: 'r', render: (r) => String(r.reqs) },
-  { key: 'inTok', header: 'IN', width: 7, align: 'r', render: (r) => fmtTok(r.inTok) },
-  { key: 'outTok', header: 'OUT', width: 7, align: 'r', render: (r) => fmtTok(r.outTok) },
-  { key: 'cacheRead', header: 'CACHE', width: 7, align: 'r', render: (r) => fmtTok(r.cacheRead) },
-  { key: 'avgTps', header: 'AVG TKS', width: 7, align: 'r', render: (r) => fmtTps(r.avgTps) },
-  { key: 'peakTps', header: 'PEAK', width: 6, align: 'r', render: (r) => fmtTps(r.peakTps) },
+  { key: 'inTok', header: 'INPUT', width: 7, align: 'r', render: (r) => fmtMetricTok(r.inTok) },
+  { key: 'outTok', header: 'OUTPUT', width: 7, align: 'r', render: (r) => fmtMetricTok(r.outTok) },
+  { key: 'cacheRead', header: 'CACHE', width: 7, align: 'r', render: (r) => fmtMetricTok(r.cacheRead) },
+  { key: 'avgTps', header: 'AVG TPS', width: 7, align: 'r', render: (r) => fmtTps(r.avgTps) },
+  { key: 'peakTps', header: 'PEAK TPS', width: 8, align: 'r', render: (r) => fmtTps(r.peakTps) },
   {
     key: 'share', header: 'SHARE', width: 14, render: (r) => {
       const bar = gaugeBar(r.share, 1, 7, '█', '░');
@@ -47,6 +51,7 @@ export function Models(props: ModelsProps): React.ReactElement {
   const stats = modelStats(filtered);
   const rows: DisplayRow[] = stats.map((m) => ({
     model: m.model,
+    src: m.srcs[0],
     srcs: m.srcs.map((s) => s.toUpperCase()).join('+'),
     reqs: m.reqs,
     inTok: m.inTok,
@@ -68,24 +73,47 @@ export function Models(props: ModelsProps): React.ReactElement {
         : String(av).localeCompare(String(bv));
     return cmp * sort.dir;
   });
+  const direction = sort.dir === -1 ? '▼' : '▲';
+  const totalOutput = rows.reduce((sum, row) => sum + row.outTok, 0);
+  const coloredColumns = COLUMNS.map((c) => {
+    if (c.key === 'srcs' || c.key === 'share') {
+      return { ...c, color: (row: DisplayRow) => (row.src ? theme.srcColors[row.src] : theme.accent) };
+    }
+    if (c.key === 'avgTps' || c.key === 'peakTps') {
+      return { ...c, color: () => theme.accent };
+    }
+    return c;
+  });
 
   return (
-    <Box flexDirection="column">
-      <Text bold color={theme.text}>MODELS · ←/→ sort column · enter flip · {srcFilter !== 'all' ? srcFilter : 'all sources'}</Text>
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
+      <Text bold color={theme.text}>MODELS <Text color={theme.dim}>· token usage & request throughput</Text></Text>
       {sorted.length === 0 ? (
-        <Box borderStyle="round" borderColor={theme.border} paddingX={1} marginY={1}>
+        <Box marginY={1}>
           <Text color={theme.dim}>no models in window —</Text>
         </Box>
       ) : (
-        <Table
-          columns={COLUMNS.map((c, i) =>
-            // active sort column widens by 2 so the ASCII direction marker never truncates the header
-            i === sort.col
-              ? { ...c, header: `${c.header} ${sort.dir === -1 ? 'v' : '^'}`, width: c.width + 2 }
-              : c,
-          )}
-          rows={sorted}
-        />
+        <>
+          <Text color={theme.dim}>{rows.length} models · {filtered.length} requests · {fmtMetricTok(totalOutput)} output · {srcFilter === 'all' ? 'all sources' : srcFilter}</Text>
+          <Text color={theme.dim}>SORT <Text color={theme.text}>{col.header} {direction}</Text> · {sort.dir === -1 ? 'descending' : 'ascending'}</Text>
+          <Box flexDirection="column" marginTop={1}>
+            <Table
+              columns={coloredColumns.map((c, i) =>
+                // active sort column widens by 2 so the direction marker never truncates the header
+                i === sort.col
+                  ? { ...c, header: `${c.header} ${direction}`, width: c.width + 2 }
+                  : c,
+              )}
+              rows={sorted}
+              headerColor={theme.dim}
+              dim={theme.dim}
+            />
+          </Box>
+          <Box flexDirection="column" marginTop={1}>
+            <Text color={theme.dim}>AVG TPS / PEAK TPS = output tokens / second · SHARE = output-token share</Text>
+            <Text color={theme.dim}>←/→ sort column · Enter flip direction</Text>
+          </Box>
+        </>
       )}
     </Box>
   );

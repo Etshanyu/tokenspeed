@@ -28,9 +28,13 @@ test('timeline renders title, bucket labels and peak summary', () => {
   const frame = inst.lastFrame()!;
   inst.unmount();
   assert.ok(frame.includes('TIMELINE'));
-  assert.ok(frame.includes('10-30')); // first bucket date label (7d back)
+  assert.ok(frame.includes('10-29')); // selected 7d window starts here, not at the first record
   assert.ok(frame.includes('11-05')); // last bucket date label
-  assert.ok(frame.includes('peak'));
+  assert.ok(frame.includes('PEAK'));
+  assert.ok(frame.includes('OUTPUT'));
+  assert.ok(frame.includes('CACHE READ'));
+  assert.ok(frame.includes('SOURCES'));
+  assert.ok(frame.includes('5-bucket trend'));
 });
 
 test('timeline empty window renders no-activity state', () => {
@@ -49,9 +53,12 @@ test('timeline uses plan bucket counts (7d -> 28 buckets) regardless of width', 
   const frame = inst.lastFrame()!;
   inst.unmount();
   assert.ok(frame.includes('6h buckets'));
-  // chart rows must be exactly 28 cells wide
-  const rows = frame.split('\n').map(stripAnsi).filter((l) => l.length > 10 && /[█▀▄· ]{20,}/.test(l));
-  assert.ok(rows.length > 0);
+  // chart rows must be exactly 28 cells wide inside the panel
+  const rows = frame.split('\n').map(stripAnsi).flatMap((line) => {
+    const match = line.match(/│ ([█▀▄· ]{28}) *│/);
+    return match && /[█▀▄·]/.test(match[1]) ? [match[1]] : [];
+  });
+  assert.equal(rows.length, 8);
   for (const r of rows) assert.equal(r.length, 28);
 });
 

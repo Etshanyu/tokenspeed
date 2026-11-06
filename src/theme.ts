@@ -11,6 +11,7 @@ export interface Theme {
   gradFrom: string;
   gradTo: string;
   srcColors: Record<SourceId, string>;
+  srcGradients?: Record<SourceId, string[]>;
   /** 10-level intensity ramp, dim -> hot */
   heat: string[];
 }
@@ -18,16 +19,21 @@ export interface Theme {
 export const THEMES: Theme[] = [
   {
     name: 'observatory',
-    bg: '#0a0e14',
-    panel: '#11151c',
-    border: '#2b3648',
-    text: '#c9d1d9',
-    dim: '#6b7280',
-    accent: '#22d3ee',
-    gradFrom: '#22d3ee',
-    gradTo: '#f472b6',
-    srcColors: { codex: '#f59e0b', claude: '#22d3ee', dsh: '#f472b6' },
-    heat: ['#1e2a38', '#233244', '#283a50', '#2d425c', '#32506c', '#386282', '#3f7a9c', '#4896b4', '#55b2ca', '#6cd4e8'],
+    bg: '#020610',
+    panel: '#0b1420',
+    border: '#26384a',
+    text: '#e8fbff',
+    dim: '#6f8ca6',
+    accent: '#67e8f9',
+    gradFrom: '#67e8f9',
+    gradTo: '#c084fc',
+    srcColors: { codex: '#00ffc6', claude: '#ffd166', dsh: '#ff4fa3' },
+    srcGradients: {
+      codex: ['#00ffc6', '#00a3ff'],
+      claude: ['#fff45a', '#ff8a3d'],
+      dsh: ['#ff4fa3', '#b86bff'],
+    },
+    heat: ['#102a3a', '#103b4b', '#104c5c', '#105d6d', '#106e7e', '#10808f', '#1091a0', '#10a3b1', '#10b4c2', '#10c6d3'],
   },
   {
     name: 'ember',

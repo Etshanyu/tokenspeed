@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { buildRuntime } from './main.tsx';
+import React from 'react';
+import { render } from 'ink-testing-library';
+import { Boot, buildRuntime } from './main.tsx';
 
 let root = '';
 let cacheDir = '';
@@ -47,4 +49,14 @@ test('buildRuntime scans via adapters, persists cache, second run is incremental
 
   const rescanned = await buildRuntime({ root, cacheDir, rescan: true });
   assert.equal(rescanned.scanned, 1);
+});
+
+test('boot screen hides progress details and session file names', () => {
+  const inst = render(React.createElement(Boot));
+  const frame = inst.lastFrame()!;
+  inst.unmount();
+  assert.ok(frame.includes('loading local telemetry'));
+  assert.ok(!frame.includes('100%'));
+  assert.ok(!frame.includes('session-'));
+  assert.ok(!frame.includes('████'));
 });

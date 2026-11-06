@@ -76,8 +76,8 @@ test('app shell renders banner, nav, filters, status bar', () => {
   assert.ok(frame.includes('observatory'));
   assert.ok(frame.includes('Codex + Claude + DSH')); // capitalized like the screenshot
   assert.ok(/TOKEN SPEED/.test(frame));
-  assert.ok(frame.includes('[F1] Overview'));
-  assert.ok(frame.includes('[F2] Timeline'));
+  assert.ok(frame.includes('F1 Overview'));
+  assert.ok(frame.includes('F2 Timeline'));
   assert.ok(frame.includes('SOURCE'));
   assert.ok(frame.includes('WINDOW'));
   assert.ok(/LIVE|paused/i.test(frame));
@@ -93,4 +93,14 @@ test('app shell shows filter key hints for registered adapters', () => {
   assert.ok(frame.includes('1 All'));
   assert.ok(frame.includes('2 Codex') || frame.includes('2 CODEX'));
   assert.ok(frame.includes('3 Claude') || frame.includes('3 CLAUDE'));
+});
+
+test('initial page opens the requested view directly', () => {
+  const inst = render(
+    <App records={[]} now={new Date('2026-11-05T12:00:00').getTime()} initial={{ page: 'timeline' }} />,
+  );
+  const frame = inst.lastFrame()!;
+  inst.unmount();
+  assert.ok(frame.includes('TIMELINE'));
+  assert.ok(!frame.includes('ACTIVITY MAP'));
 });

@@ -1,8 +1,28 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sparkline, heatStrip, gaugeBar, histogram } from './chart.ts';
+import { sparkline, heatStrip, activityStrip, gradientBar, gaugeBar, histogram } from './chart.ts';
 
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, '');
+
+test('gradientBar keeps its width and interpolates the active fill', () => {
+  const bar = gradientBar(5, 10, 4, ['#000000', '#ffffff'], '#111111');
+  assert.equal(stripAnsi(bar), '████');
+  assert.ok(bar.includes('\x1b[38;2;0;0;0m'));
+  assert.ok(bar.includes('\x1b[38;2;255;255;255m'));
+  assert.ok(bar.includes('\x1b[38;2;17;17;17m'));
+});
+
+test('activityStrip keeps quiet buckets dim and active buckets source-colored', () => {
+  const strip = activityStrip([0, 10], 2, '#8ee9c0', '#2b3242');
+  assert.equal(stripAnsi(strip), '·█');
+  assert.ok(strip.includes('\x1b[38;2;43;50;66m'));
+  assert.ok(strip.includes('\x1b[38;2;142;233;192m'));
+});
+
+test('activityStrip shared scale prevents small sources from appearing saturated', () => {
+  const strip = activityStrip([10], 1, '#8ee9c0', '#2b3242', 100);
+  assert.equal(stripAnsi(strip), '▂');
+});
 
 test('sparkline resamples to exact width both directions', () => {
   const long = sparkline([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 5);

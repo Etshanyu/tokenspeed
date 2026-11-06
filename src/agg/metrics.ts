@@ -31,6 +31,8 @@ export function applyFilters(
 export interface SourceSummary {
   src: SourceId;
   avgTps: number | null;
+  medianTps: number | null;
+  usablePct: number;
   inTok: number;
   outTok: number;
   cacheRead: number;
@@ -39,6 +41,15 @@ export interface SourceSummary {
   sessions: number;
   activeMs: number;
   spark: number[];
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
 }
 
 export function sourceSummaries(records: TurnRecord[], sparkBuckets = 32): SourceSummary[] {
@@ -54,9 +65,12 @@ export function sourceSummaries(records: TurnRecord[], sparkBuckets = 32): Sourc
     const inTok = list.reduce((s, r) => s + r.inTok, 0);
     const cacheRead = list.reduce((s, r) => s + r.cacheRead, 0);
     const activeMs = list.reduce((s, r) => s + Math.max(0, r.durMs), 0);
+    const usable = list.filter((r) => r.durMs > 0);
     out.push({
       src,
       avgTps: activeMs > 0 ? (outTok / activeMs) * 1000 : null,
+      medianTps: median(usable.map((r) => (r.outTok / r.durMs) * 1000)),
+      usablePct: list.length > 0 ? usable.length / list.length : 0,
       inTok, outTok, cacheRead,
       cacheWrite: list.reduce((s, r) => s + r.cacheWrite, 0),
       reqs: list.length,

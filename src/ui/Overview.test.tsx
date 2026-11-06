@@ -23,7 +23,7 @@ const records: TurnRecord[] = [
   rec({ src: 'dsh', ts: NOW - 600_000, outTok: 150, model: 'deepseek-flash', durMs: 1000 }),
 ];
 
-test('renders source cards, charts and latest activity', () => {
+test('renders source speed cards with complementary usage and timing below', () => {
   const inst = render(
     <Overview records={records} now={NOW} theme={THEMES[0]} srcFilter="all" />,
   );
@@ -32,17 +32,20 @@ test('renders source cards, charts and latest activity', () => {
   assert.ok(frame.includes('CLAUDE'));
   assert.ok(frame.includes('CODEX'));
   assert.ok(frame.includes('DSH'));
-  assert.ok(frame.includes('tok/s'));
+  assert.ok(frame.includes('output tokens / second'));
+  assert.ok(frame.includes('Median'));
+  assert.ok(frame.includes('usable'));
   assert.ok(frame.includes('ACTIVITY MAP'));
-  assert.ok(frame.includes('MODEL VELOCITY'));
+  assert.ok(frame.includes('MODEL USAGE'));
+  assert.ok(frame.includes('output / share'));
+  assert.ok(frame.includes('OUTPUT ACTIVITY'));
   assert.ok(frame.includes('LATEST ACTIVITY'));
-  assert.ok(frame.includes('glm-5.3'));
-  // screenshot-style session table columns
-  assert.ok(frame.includes('SESSION'));
-  assert.ok(frame.includes('STARTED'));
-  assert.ok(frame.includes('LAST ACTIVE'));
   assert.ok(frame.includes('DURATION'));
-  assert.ok(frame.includes('TOKENS'));
+  assert.ok(!frame.includes('MODEL VELOCITY'));
+  assert.ok(!frame.includes('SPEED'));
+  assert.ok(frame.includes('glm-5.3'));
+  assert.ok(frame.includes('3 sessions'));
+  assert.ok(!frame.includes('SESSION'));
 });
 
 test('srcFilter restricts cards to that source', () => {
@@ -85,27 +88,32 @@ test('no ALL row or card: exactly the screenshot card row', () => {
   );
   const frame = stripAnsi(inst.lastFrame()!);
   inst.unmount();
-  // no ALL headline, no standalone ALL card
   assert.ok(!/^ALL/m.test(frame));
   assert.ok(!/ALL\s+\S+\s*tok\/s/.test(frame));
   assert.ok(frame.includes('CODEX'));
   assert.ok(frame.includes('CLAUDE'));
   assert.ok(frame.includes('DSH'));
-  // screenshot card summary format: Σ <dur> · <n> tok
-  assert.ok(/Σ \S+ · \S+ tok/.test(frame));
-  // activity map carries date ticks
-  assert.ok(/10-\d\d/.test(frame));
+  assert.ok(/Median \S+ · \d+ requests/.test(frame));
+  assert.ok(/10\/\d\d/.test(frame));
+  assert.ok(frame.includes('output tokens / time bucket'));
+  assert.ok(frame.includes('shared scale'));
+  assert.ok(frame.includes('no output'));
+  assert.ok(frame.includes('/bucket'));
+  assert.ok(frame.includes('BUCKET ACTIVITY'));
+  assert.ok(frame.includes('TOTAL'));
+  assert.ok(frame.includes('TIME'));
+  assert.ok(frame.includes('DURATION'));
+  assert.ok(!frame.includes('SPEED'));
 });
 
-test('overviewLayout sizes histogram to fit beside MODEL VELOCITY', () => {
+test('overviewLayout keeps cards and the 2:1 lower split within the terminal', () => {
   for (const width of [80, 100, 120, 160]) {
-    for (const nSeries of [1, 2, 3, 4]) {
-      const { histBuckets, velocityWidth } = overviewLayout(width, nSeries);
-      assert.ok(histBuckets >= 4, `width=${width} series=${nSeries}`);
-      assert.ok(
-        histBuckets * nSeries + velocityWidth + 2 <= width - 4,
-        `width=${width} series=${nSeries}: hist ${histBuckets * nSeries} + vel ${velocityWidth} must fit in ${width - 4}`,
-      );
+    for (const nSources of [1, 2, 3, 4]) {
+      const layout = overviewLayout(width, nSources);
+      assert.ok(layout.cardWidth * nSources + Math.max(0, nSources - 1) <= width);
+      assert.ok(layout.leftWidth + layout.rightWidth + 2 <= width);
+      assert.ok(layout.activityWidth >= 4);
+      assert.ok(layout.velocityWidth >= 12);
     }
   }
 });

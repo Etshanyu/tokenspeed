@@ -12,7 +12,6 @@ import type { IndexStore } from './scan/indexer.ts';
 import { startWatch } from './scan/watcher.ts';
 import { App } from './ui/App.tsx';
 import { THEMES } from './theme.ts';
-import { gaugeBar } from './ui/comp/chart.ts';
 import type { WindowKey } from './agg/metrics.ts';
 
 const VERSION = '0.1.0';
@@ -37,18 +36,15 @@ export async function buildRuntime(opts: {
   };
 }
 
-function Boot(props: { done: number; total: number; file: string }): React.ReactElement {
+export function Boot(): React.ReactElement {
   const theme = THEMES[0];
-  const pct = props.total > 0 ? props.done / props.total : 0;
   return (
     <Box flexDirection="column" alignItems="center" padding={1} gap={1}>
       <Text bold color={theme.accent}>TOKEN SPEED · observatory</Text>
       <Text color={theme.accent}>
         <Spinner type="dots" />{'  '}
-        scanning local telemetry {props.done}/{props.total}
+        loading local telemetry…
       </Text>
-      <Text>{gaugeBar(props.done, Math.max(1, props.total), 40, '█', '░')}</Text>
-      <Text color={theme.dim}>{Math.round(pct * 100)}% · {props.file}</Text>
     </Box>
   );
 }
@@ -58,6 +54,7 @@ function Root(props: {
   cacheDir: string;
   root: string;
   live: boolean;
+  initPage: 'overview' | 'timeline' | 'models' | 'requests';
   initSrc: string;
   initWin: WindowKey;
   initTheme: number;
@@ -118,7 +115,7 @@ function Root(props: {
       lastRefresh={lastRefresh}
       now={now}
       onRefresh={() => { void rescan(); }}
-      initial={{ srcFilter: props.initSrc, win: props.initWin, themeIdx: props.initTheme }}
+      initial={{ page: props.initPage, srcFilter: props.initSrc, win: props.initWin, themeIdx: props.initTheme }}
     />
   );
 }
@@ -126,6 +123,7 @@ function Root(props: {
 async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
+      page: { type: 'string' },
       source: { type: 'string' },
       window: { type: 'string' },
       'no-live': { type: 'boolean' },
@@ -136,14 +134,16 @@ async function main(): Promise<void> {
   const root = process.env.TOKENSPEED_HOME ?? homedir();
   const cacheDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.data');
 
-  const boot = render(<Boot done={0} total={0} file="" />);
+  const boot = render(<Boot />);
   try {
     const { records } = await buildRuntime({
       root, cacheDir, rescan: values.rescan === true,
-      onProgress: (p) => boot.rerender(<Boot done={p.done} total={p.total} file={p.file} />),
     });
+    boot.clear();
     boot.unmount();
 
+    const page = ['overview', 'timeline', 'models', 'requests'].includes(String(values.page))
+      ? (values.page as 'overview' | 'timeline' | 'models' | 'requests') : 'overview';
     const win: WindowKey = ['today', '7d', '30d', 'all'].includes(String(values.window))
       ? (values.window as WindowKey) : '7d';
     const src = ADAPTERS.some((a) => a.id === values.source) || values.source === 'all'
@@ -160,12 +160,14 @@ async function main(): Promise<void> {
         cacheDir={cacheDir}
         root={root}
         live={values['no-live'] !== true}
+        initPage={page}
         initSrc={src}
         initWin={win}
         initTheme={themeIdx}
       />,
     );
   } catch (err) {
+    boot.clear();
     boot.unmount();
     console.error('tokenspeed failed to start:', err);
     process.exit(1);

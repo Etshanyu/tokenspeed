@@ -26,6 +26,14 @@ test('enableRawMode is a no-op without TTY or setRawMode support', () => {
   );
 });
 
+test('enableRawMode degrades safely when the terminal rejects raw mode', () => {
+  const fakeStdin = {
+    isTTY: true,
+    setRawMode(): void { throw new Error('EPERM'); },
+  };
+  assert.equal(enableRawMode(fakeStdin as never), null);
+});
+
 test('F1-F4 in both escape sequence dialects map to pages', () => {
   assert.deepEqual(parseKey('\x1bOP'), { t: 'page', p: 'overview' });
   assert.deepEqual(parseKey('\x1b[11~'), { t: 'page', p: 'overview' });

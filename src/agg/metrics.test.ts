@@ -53,6 +53,8 @@ test('sourceSummaries aggregates per source with honest avg tps', () => {
   assert.equal(claude.avgTps, 400000 / 6000 * 1); // (100+300)/(6000ms) => 66.7 tok/s
   assert.equal(claude.avgTps!, 400 / 6);
   assert.equal(claude.outTok, 400);
+  assert.equal(claude.medianTps, 62.5);
+  assert.equal(claude.usablePct, 1);
   assert.equal(claude.reqs, 2);
   assert.equal(claude.sessions, 1);
   assert.equal(claude.activeMs, 6000);
