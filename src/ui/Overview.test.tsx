@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { render } from 'ink-testing-library';
-import { Overview, overviewLayout } from './Overview.tsx';
+import { Overview, overviewLayout, solidNumberLines } from './Overview.tsx';
 import { THEMES } from '../theme.ts';
 import { displayWidth } from '../util/fmt.ts';
 import type { TurnRecord } from '../sources/types.ts';
@@ -82,6 +82,37 @@ test('every frame line fits 100 columns with three sources (layout regression)',
   assert.deepEqual(offenders, []);
 });
 
+test('ACTIVITY MAP and MODEL USAGE bottom borders share one row', () => {
+  const inst = render(
+    <Overview records={records} now={NOW} theme={THEMES[0]} srcFilter="all" />,
+  );
+  const lines = stripAnsi(inst.lastFrame()!).split('\n');
+  inst.unmount();
+  const titleRow = lines.findIndex((line) => line.includes('ACTIVITY MAP'));
+  const nextPanelRow = lines.findIndex((line) => line.includes('LATEST ACTIVITY'));
+  const sharedBottom = lines.slice(titleRow + 1, nextPanelRow).some((line) => {
+    const left = line.indexOf('╰');
+    return left >= 0 && line.indexOf('╰', left + 1) > left;
+  });
+  assert.ok(titleRow >= 0 && nextPanelRow > titleRow);
+  assert.ok(sharedBottom, 'upper panel bottoms must align');
+});
+
+test('LATEST ACTIVITY and OUTPUT ACTIVITY bottom borders share one row', () => {
+  const inst = render(
+    <Overview records={records} now={NOW} theme={THEMES[0]} srcFilter="all" />,
+  );
+  const lines = stripAnsi(inst.lastFrame()!).split('\n');
+  inst.unmount();
+  const titleRow = lines.findIndex((line) => line.includes('LATEST ACTIVITY'));
+  const sharedBottom = lines.slice(titleRow + 1).some((line) => {
+    const left = line.indexOf('╰');
+    return left >= 0 && line.indexOf('╰', left + 1) > left;
+  });
+  assert.ok(titleRow >= 0);
+  assert.ok(sharedBottom, 'lower panel bottoms must align');
+});
+
 test('no ALL row or card: exactly the screenshot card row', () => {
   const inst = render(
     <Overview records={records} now={NOW} theme={THEMES[0]} srcFilter="all" />,
@@ -104,6 +135,33 @@ test('no ALL row or card: exactly the screenshot card row', () => {
   assert.ok(frame.includes('TIME'));
   assert.ok(frame.includes('DURATION'));
   assert.ok(!frame.includes('SPEED'));
+});
+
+test('cumulative DSH output is visible without inventing windowed activity', () => {
+  const total = rec({
+    src: 'dsh', ts: NOW - 600_000, outTok: 600, durMs: 3000,
+    kind: 'session', requestCount: 355,
+  });
+  const inst = render(
+    <Overview records={[total]} now={NOW} theme={THEMES[0]} srcFilter="dsh" win="7d" />,
+  );
+  const frame = inst.lastFrame()!;
+  inst.unmount();
+  assert.ok(frame.includes('DSH'));
+  assert.ok(frame.includes('cumulative session decode'));
+  assert.ok(frame.includes('355 model calls'));
+  assert.ok(frame.includes('All-time · 1 sessions'));
+  assert.ok(frame.includes('DSH 600 tokens'));
+  assert.ok(frame.includes('All-time · no time series'));
+  assert.ok(frame.includes('0 sessions · 0 models · 0 output tokens'));
+});
+
+test('solid pixel numbers stay compact and keep the decimal point', () => {
+  const lines = solidNumberLines('235.9');
+  assert.equal(lines.length, 5);
+  assert.ok(lines.every((line) => displayWidth(line) <= 24));
+  assert.ok(lines[0].includes('████'));
+  assert.ok(lines[4].includes('█ '));
 });
 
 test('overviewLayout keeps cards and the 2:1 lower split within the terminal', () => {

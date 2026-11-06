@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseKey, enableRawMode } from './keys.ts';
+import { parseKey, createKeyDecoder, enableRawMode } from './keys.ts';
 
 test('enableRawMode toggles raw mode and restores on cleanup', () => {
   const calls: (boolean | undefined)[] = [];
@@ -51,6 +51,28 @@ test('digits map to source filter keys', () => {
   assert.deepEqual(parseKey('9'), { t: 'src', key: '9' });
 });
 
+test('stream decoder preserves rapid source changes including return to All', () => {
+  const decode = createKeyDecoder();
+  assert.deepEqual(decode('2341'), [
+    { t: 'src', key: '2' },
+    { t: 'src', key: '3' },
+    { t: 'src', key: '4' },
+    { t: 'src', key: '1' },
+  ]);
+});
+
+test('stream decoder joins split F-keys and handles mixed chunks', () => {
+  const decode = createKeyDecoder();
+  assert.deepEqual(decode('\x1b'), []);
+  assert.deepEqual(decode('OP'), [{ t: 'page', p: 'overview' }]);
+  assert.deepEqual(decode('2\x1bOQ3'), [
+    { t: 'src', key: '2' },
+    { t: 'page', p: 'timeline' },
+    { t: 'src', key: '3' },
+  ]);
+  assert.deepEqual(decode('\x1b[200~1'), [{ t: 'src', key: '1' }]);
+});
+
 test('window keys: t today, w cycle, a all', () => {
   assert.deepEqual(parseKey('t'), { t: 'win', w: 'today' });
   assert.deepEqual(parseKey('w'), { t: 'winCycle' });
@@ -74,6 +96,8 @@ test('navigation keys', () => {
 test('utility keys', () => {
   assert.deepEqual(parseKey('r'), { t: 'refresh' });
   assert.deepEqual(parseKey('x'), { t: 'theme' });
+  assert.deepEqual(parseKey('l'), { t: 'lang' });
+  assert.deepEqual(parseKey('L'), { t: 'lang' });
   assert.deepEqual(parseKey('q'), { t: 'quit' });
   assert.deepEqual(parseKey('\x03'), { t: 'quit' });
 });

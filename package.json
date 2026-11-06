@@ -1,16 +1,37 @@
 {
   "name": "tokenspeed",
   "version": "0.1.0",
-  "description": "TOKEN SPEED observatory - local token telemetry TUI for Claude Code / Codex / DSH",
+  "description": "Local-first token telemetry TUI for Claude Code, Codex and DSH",
   "type": "module",
-  "private": true,
+  "license": "MIT",
   "bin": {
-    "tokenspeed": "src/main.tsx"
+    "tokenspeed": "dist/main.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "claude-code",
+    "codex",
+    "dsh",
+    "token-usage",
+    "tui",
+    "observability"
+  ],
   "scripts": {
     "start": "tsx src/main.tsx",
+    "start:built": "node dist/main.js",
+    "build": "tsc -p tsconfig.build.json",
     "test": "node --import tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "bench": "tsx scripts/benchmark.ts",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "fzstd": "^0.1.1",

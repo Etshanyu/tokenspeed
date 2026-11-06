@@ -10,6 +10,8 @@ import {
 import type { SourceSummary, WindowKey } from '../agg/metrics.ts';
 import { activityStrip, gradientBar, histogram, sparkline } from './comp/chart.ts';
 import { fmtDur, fmtPct, fmtTok, truncateToWidth, displayWidth } from '../util/fmt.ts';
+import { t } from './i18n.ts';
+import type { Language } from './i18n.ts';
 
 export interface OverviewProps {
   records: TurnRecord[];
@@ -17,6 +19,7 @@ export interface OverviewProps {
   theme: Theme;
   srcFilter: SourceId | 'all';
   win?: WindowKey;
+  lang?: Language;
 }
 
 export function overviewLayout(width: number, nSources: number): {
@@ -85,14 +88,42 @@ function prettySource(src: string): string {
 
 const compactBigText = { spaceless: true };
 
+const SOLID_DIGITS: Record<string, string[]> = {
+  '0': ['████', '█  █', '█  █', '█  █', '████'],
+  '1': ['  █ ', ' ██ ', '  █ ', '  █ ', '████'],
+  '2': ['████', '   █', '████', '█   ', '████'],
+  '3': ['████', '   █', ' ███', '   █', '████'],
+  '4': ['█  █', '█  █', '████', '   █', '   █'],
+  '5': ['████', '█   ', '████', '   █', '████'],
+  '6': ['████', '█   ', '████', '█  █', '████'],
+  '7': ['████', '   █', '  █ ', ' █  ', ' █  '],
+  '8': ['████', '█  █', '████', '█  █', '████'],
+  '9': ['████', '█  █', '████', '   █', '████'],
+  '.': ['  ', '  ', '  ', '  ', '█ '],
+};
+
+export function solidNumberLines(value: string): string[] {
+  const glyphs = [...value].map((char) => SOLID_DIGITS[char] ?? ['    ', '    ', '    ', '    ', '    ']);
+  return Array.from({ length: 5 }, (_, row) => glyphs.map((glyph) => glyph[row]).join(' ').trimEnd());
+}
+
+function SolidNumber(props: { value: string; color: string }): React.ReactElement {
+  return (
+    <Box flexDirection="column">
+      {solidNumberLines(props.value).map((line, i) => <Text key={i} color={props.color}>{line}</Text>)}
+    </Box>
+  );
+}
+
 function SourceCard(props: {
   summary: SourceSummary;
   label: string;
   color: string;
   theme: Theme;
   width: number;
+  lang: Language;
 }): React.ReactElement {
-  const { summary, color, theme, width } = props;
+  const { summary, color, theme, width, lang } = props;
   const tps = useTween(summary.avgTps);
   const chartWidth = Math.max(4, width - 4);
   const wide = width >= 42;
@@ -111,29 +142,41 @@ function SourceCard(props: {
     >
       <Text bold color={color}>
         {props.label.toUpperCase()}{' '}
-        <Text color={theme.dim}>{fullHeader ? 'weighted request throughput' : 'weighted throughput'}</Text>
+        <Text color={theme.dim}>{summary.cumulative
+          ? t(lang, fullHeader ? 'cumulativeSessionDecode' : 'sessionTotals')
+          : t(lang, fullHeader ? 'weightedRequestThroughput' : 'weightedThroughput')}</Text>
       </Text>
       {tps === null ? (
         <Text bold color={color}>—</Text>
-      ) : (
+      ) : width >= 48 ? (
         <BigText
           text={fmtRate(tps)}
-          font={width >= 48 ? 'block' : 'tiny'}
+          font="block"
           colors={[color]}
           lineHeight={0}
           letterSpacing={1}
           {...compactBigText}
         />
+      ) : (
+        <SolidNumber value={fmtRate(tps)} color={color} />
       )}
-      <Text color={theme.dim}>{wide ? 'estimated output tokens / second' : 'output tokens / second'}</Text>
-      <Text color={theme.text}>Median {fmtRate(summary.medianTps)} <Text color={theme.dim}>· {summary.reqs} requests</Text></Text>
+      <Text color={theme.dim}>{summary.cumulative
+        ? t(lang, 'measuredDecodeRate')
+        : t(lang, wide ? 'estimatedOutputRate' : 'outputRate')}</Text>
+      {summary.cumulative ? (
+        <Text color={theme.text}>{summary.reqs} {t(lang, 'modelCalls')} <Text color={theme.dim}>· {t(lang, 'cumulativeTotal')}</Text></Text>
+      ) : (
+        <Text color={theme.text}>{t(lang, 'median')} {fmtRate(summary.medianTps)} <Text color={theme.dim}>· {summary.reqs} {t(lang, 'requests')}</Text></Text>
+      )}
       <Text color={theme.dim}>
         {wide
-          ? `${fmtMetricTok(summary.outTok)} output tokens · ${usable}% usable timing`
-          : `${fmtMetricTok(summary.outTok)} output · ${usable}% usable`}
+          ? `${fmtMetricTok(summary.outTok)} ${t(lang, 'outputTokens')} · ${usable}% ${t(lang, 'usableTiming')}`
+          : `${fmtMetricTok(summary.outTok)} ${t(lang, 'output')} · ${usable}% ${t(lang, 'usable')}`}
       </Text>
       <Box marginTop={1} flexDirection="column">
-        {histogram([{ values: summary.spark, color }], chartWidth, 3).map((line, i) => (
+        {summary.cumulative ? (
+          <Text color={theme.dim}>{t(lang, 'allTimeSessions')} · {summary.sessions} {t(lang, 'sessions')}</Text>
+        ) : histogram([{ values: summary.spark, color }], chartWidth, 3).map((line, i) => (
           <Text key={i}>{line}</Text>
         ))}
       </Box>
@@ -141,10 +184,10 @@ function SourceCard(props: {
   );
 }
 
-function fmtActivityDate(ts: number): string {
+function fmtActivityDate(ts: number, lang: Language): string {
   const d = new Date(ts);
   const p = (x: number) => String(x).padStart(2, '0');
-  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}h`;
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}${lang === 'zh' ? '时' : 'h'}`;
 }
 
 function fmtRequestTime(ts: number, compact: boolean): string {
@@ -155,21 +198,30 @@ function fmtRequestTime(ts: number, compact: boolean): string {
 }
 
 export function Overview(props: OverviewProps): React.ReactElement {
-  const { records, now, theme, srcFilter, win = '7d' } = props;
+  const { records, now, theme, srcFilter, win = '7d', lang = 'en' } = props;
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 100;
 
   const filtered = applyFilters(records, srcFilter, windowRange(win, now));
-  const summaries = sourceSummaries(filtered).sort((a, b) => {
+  const activity = filtered.filter((r) => r.kind !== 'session');
+  const byAdapter = (a: { src: string }, b: { src: string }): number => {
     const ai = ADAPTERS.findIndex((adapter) => adapter.id === a.src);
     const bi = ADAPTERS.findIndex((adapter) => adapter.id === b.src);
     return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
-  });
+  };
+  // Session-total cards remain visible in bounded windows, but their values stay
+  // explicitly All-time and never enter windowed charts or request statistics.
+  const summaryRecords = win === 'all' ? filtered : [
+    ...filtered,
+    ...records.filter((r) => r.kind === 'session' && (srcFilter === 'all' || r.src === srcFilter)),
+  ];
+  const summaries = sourceSummaries(summaryRecords).sort(byAdapter);
+  const activitySummaries = sourceSummaries(activity).sort(byAdapter);
   const layout = overviewLayout(width, Math.max(1, summaries.length));
 
   let minTs = Infinity;
   let maxTs = -Infinity;
-  for (const r of filtered) {
+  for (const r of activity) {
     minTs = Math.min(minTs, r.ts);
     maxTs = Math.max(maxTs, r.ts);
   }
@@ -180,8 +232,8 @@ export function Overview(props: OverviewProps): React.ReactElement {
       : { from: now - 86400_000, to: now }
     : selectedRange;
   const activityBarWidth = Math.max(4, layout.activityWidth - 9);
-  const histBs = buckets(filtered, range, activityBarWidth);
-  const histSources = summaries.map((s) => s.src);
+  const histBs = buckets(activity, range, activityBarWidth);
+  const histSources = activitySummaries.map((s) => s.src);
   const activityPeak = Math.max(
     1,
     ...histBs.flatMap((bucket) => histSources.map((src) => bucket.out[src] ?? 0)),
@@ -198,11 +250,23 @@ export function Overview(props: OverviewProps): React.ReactElement {
     .slice(0, 3);
   let maxModelOutput = 1;
   for (const m of models) maxModelOutput = Math.max(maxModelOutput, m.outTok);
+  // Both upper panels start together; one shared height keeps their bottom borders aligned.
+  const upperPanelHeight = Math.max(8, activitySummaries.length + 7, models.length * 2 + 3);
 
-  const latest = [...filtered].sort((a, b) => b.ts - a.ts).slice(0, 4);
-  const sessionCount = new Set(filtered.map((r) => `${r.src}:${r.sid}`)).size;
-  const modelCount = new Set(filtered.map((r) => r.model)).size;
-  const outputTotal = filtered.reduce((sum, r) => sum + r.outTok, 0);
+  const latest = [...activity].sort((a, b) => b.ts - a.ts).slice(0, 4);
+  // Cumulative-only sources have no honest time series. Keep their totals visible
+  // beside the windowed sparklines without inventing per-bucket activity.
+  const cumulativeOnly = summaries.filter((s) =>
+    s.cumulative && !activitySummaries.some((activitySummary) => activitySummary.src === s.src),
+  );
+  const lowerPanelHeight = Math.max(
+    7,
+    Math.max(1, latest.length) + 6,
+    Math.max(1, (activitySummaries.length + cumulativeOnly.length) * 2) + 3,
+  );
+  const sessionCount = new Set(activity.map((r) => `${r.src}:${r.sid}`)).size;
+  const modelCount = new Set(activity.map((r) => r.model)).size;
+  const outputTotal = activity.reduce((sum, r) => sum + r.outTok, 0);
   const leftContent = Math.max(12, layout.leftWidth - 4);
   const compactLatest = leftContent < 64;
   const timeWidth = compactLatest ? 11 : 14;
@@ -225,27 +289,28 @@ export function Overview(props: OverviewProps): React.ReactElement {
                 color={theme.srcColors[summary.src] ?? theme.accent}
                 theme={theme}
                 width={layout.cardWidth}
+                lang={lang}
               />
             );
           })}
         </Box>
       ) : (
         <Box borderStyle="round" borderColor={theme.border} paddingX={1}>
-          <Text color={theme.dim}>no activity in window · — </Text>
+          <Text color={theme.dim}>{t(lang, 'noActivityWindow')}</Text>
         </Box>
       )}
 
       <Box columnGap={2} marginTop={1}>
         <Box width={layout.leftWidth} flexDirection="column" flexShrink={0}>
-          <Box borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column">
-            <Text bold color={theme.text}>ACTIVITY MAP <Text color={theme.dim}> · output tokens / time bucket</Text></Text>
-            <Text color={theme.dim}>{fmtActivityDate(range.from)} → {fmtActivityDate(range.to)} · {bucketLabel}/bucket</Text>
+          <Box height={upperPanelHeight} borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column">
+            <Text bold color={theme.text}>{t(lang, 'activityMap')} <Text color={theme.dim}> · {t(lang, 'outputPerBucket')}</Text></Text>
+            <Text color={theme.dim}>{fmtActivityDate(range.from, lang)} → {fmtActivityDate(range.to, lang)} · {bucketLabel}{t(lang, 'bucketSuffix')}</Text>
             <Box columnGap={1}>
-              <Text color={theme.dim}>{fit('SOURCE', 7)}</Text>
-              <Text color={theme.dim}>{fit('BUCKET ACTIVITY', activityBarWidth)}</Text>
-              <Text color={theme.dim}>{fit('TOTAL', 8, 'r')}</Text>
+              <Text color={theme.dim}>{fit(t(lang, 'sourceColumn'), 7)}</Text>
+              <Text color={theme.dim}>{fit(t(lang, 'bucketActivity'), activityBarWidth)}</Text>
+              <Text color={theme.dim}>{fit(t(lang, 'total'), 8, 'r')}</Text>
             </Box>
-            {summaries.map((s) => (
+            {activitySummaries.map((s) => (
               <Box key={s.src} columnGap={1}>
                 <Text color={theme.srcColors[s.src] ?? theme.accent}>{fit(prettySource(s.src), 7)}</Text>
                 <Text>{activityStrip(
@@ -258,24 +323,24 @@ export function Overview(props: OverviewProps): React.ReactElement {
                 <Text color={theme.text}>{fit(fmtMetricTok(s.outTok), 8, 'r')}</Text>
               </Box>
             ))}
-            {summaries.length === 0 && <Text color={theme.dim}>—</Text>}
+            {activitySummaries.length === 0 && <Text color={theme.dim}>—</Text>}
             <Box marginTop={1}>
-              <Text color={theme.dim}>· no output  ▁▂█ low → high · shared scale · peak {fmtMetricTok(activityPeak)}</Text>
+              <Text color={theme.dim}>· {t(lang, 'noOutput')}  ▁▂█ {t(lang, 'low')} → {t(lang, 'high')} · {t(lang, 'sharedScale')} · {t(lang, 'peak')} {fmtMetricTok(activityPeak)}</Text>
             </Box>
           </Box>
 
-          <Box borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column" marginTop={1}>
-            <Text bold color={theme.text}>LATEST ACTIVITY</Text>
+          <Box height={lowerPanelHeight} borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column" marginTop={1}>
+            <Text bold color={theme.text}>{t(lang, 'latestActivity')}</Text>
             <Text color={theme.dim} wrap="truncate">
-              {sessionCount} sessions · {modelCount} models · {fmtMetricTok(outputTotal)} output tokens
+              {sessionCount} {t(lang, 'sessions')} · {modelCount} {t(lang, 'models')} · {fmtMetricTok(outputTotal)} {t(lang, 'outputTokens')}
             </Text>
             <Box marginTop={1} flexDirection="column">
               <Text color={theme.dim}>
-                {fit('TIME', timeWidth)}{'  '}
-                {fit('SOURCE', sourceWidth)}{'  '}
-                {fit('DURATION', durationWidth)}{'  '}
-                {fit('OUTPUT', outputWidth)}{'  '}
-                {fit('MODEL', Math.max(1, latestModelWidth))}
+                {fit(t(lang, 'time'), timeWidth)}{'  '}
+                {fit(t(lang, 'sourceColumn'), sourceWidth)}{'  '}
+                {fit(t(lang, 'duration'), durationWidth)}{'  '}
+                {fit(t(lang, 'outputColumn'), outputWidth)}{'  '}
+                {fit(t(lang, 'model'), Math.max(1, latestModelWidth))}
               </Text>
               {latest.map((r) => {
                 const color = theme.srcColors[r.src] ?? theme.accent;
@@ -283,8 +348,8 @@ export function Overview(props: OverviewProps): React.ReactElement {
                   <Text key={`${r.src}:${r.sid}:${r.ts}`}>
                     <Text color={theme.dim}>{fit(fmtRequestTime(r.ts, compactLatest), timeWidth)}</Text>{'  '}
                     <Text color={color}>{fit(r.src, sourceWidth)}</Text>{'  '}
-                    <Text color={theme.text}>{fit(fmtDur(r.durMs), durationWidth)}</Text>{'  '}
-                    <Text color={theme.text}>{fit(`${fmtMetricTok(r.outTok)} output`, outputWidth)}</Text>{'  '}
+                    <Text color={theme.text}>{fit(fmtDur(r.durMs, lang), durationWidth)}</Text>{'  '}
+                    <Text color={theme.text}>{fit(`${fmtMetricTok(r.outTok)} ${t(lang, 'output')}`, outputWidth)}</Text>{'  '}
                     <Text color={theme.dim}>· {fit(r.model, Math.max(1, latestModelWidth - 2))}</Text>
                   </Text>
                 );
@@ -295,8 +360,8 @@ export function Overview(props: OverviewProps): React.ReactElement {
         </Box>
 
         <Box width={layout.rightWidth} flexDirection="column" flexShrink={0}>
-          <Box borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column">
-            <Text bold color={theme.text}>MODEL USAGE <Text color={theme.dim}>· output / share</Text></Text>
+          <Box height={upperPanelHeight} borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column">
+            <Text bold color={theme.text}>{t(lang, 'modelUsage')} <Text color={theme.dim}>· {t(lang, 'outputShare')}</Text></Text>
             {models.map((m) => {
               const src = m.srcs[0] ?? '';
               const color = theme.srcColors[src] ?? theme.accent;
@@ -316,13 +381,13 @@ export function Overview(props: OverviewProps): React.ReactElement {
             {models.length === 0 && <Text color={theme.dim}>—</Text>}
           </Box>
 
-          <Box borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column" marginTop={1}>
-            <Text bold color={theme.text}>OUTPUT ACTIVITY</Text>
-            {summaries.map((s) => {
+          <Box height={lowerPanelHeight} borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column" marginTop={1}>
+            <Text bold color={theme.text}>{t(lang, 'outputActivity')}</Text>
+            {activitySummaries.map((s) => {
               const color = theme.srcColors[s.src] ?? theme.accent;
               return (
                 <Box key={s.src} flexDirection="column">
-                  <Text color={color}>{prettySource(s.src)} <Text color={theme.text}>{fmtMetricTok(s.outTok)} tokens</Text></Text>
+                  <Text color={color}>{prettySource(s.src)} <Text color={theme.text}>{fmtMetricTok(s.outTok)} {t(lang, 'tokens')}</Text></Text>
                   <Text>{sparkline(
                     histBs.map((b) => b.out[s.src] ?? 0),
                     layout.velocityWidth,
@@ -331,7 +396,16 @@ export function Overview(props: OverviewProps): React.ReactElement {
                 </Box>
               );
             })}
-            {histSources.length === 0 && <Text color={theme.dim}>—</Text>}
+            {cumulativeOnly.map((s) => {
+              const color = theme.srcColors[s.src] ?? theme.accent;
+              return (
+                <Box key={s.src} flexDirection="column">
+                  <Text color={color}>{prettySource(s.src)} <Text color={theme.text}>{fmtMetricTok(s.outTok)} {t(lang, 'tokens')}</Text></Text>
+                  <Text color={theme.dim}>{t(lang, 'cumulativeNoTimeSeries')}</Text>
+                </Box>
+              );
+            })}
+            {histSources.length === 0 && cumulativeOnly.length === 0 && <Text color={theme.dim}>—</Text>}
           </Box>
         </Box>
       </Box>

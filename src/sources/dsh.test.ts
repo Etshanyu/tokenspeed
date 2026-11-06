@@ -20,8 +20,8 @@ after(async () => {
 });
 
 function dshDoc(o: {
-  createdAt?: number; cwd?: string; uncached?: number; out?: number; cacheRead?: number;
-  cacheWrite?: number; decodeMs?: number; llmMs?: number; model?: string | null;
+  createdAt?: number; lastMessageTime?: number; cwd?: string; uncached?: number; out?: number; cacheRead?: number;
+  cacheWrite?: number; decodeMs?: number; llmMs?: number; steps?: number; model?: string | null;
 }): string {
   const rows: Record<string, unknown> = {
     tokenUsage: { ver: 2, seq: 1, val: { totals: {
@@ -31,9 +31,10 @@ function dshDoc(o: {
       cacheWriteTokens: o.cacheWrite ?? 0,
     } } },
     sessionStats: { ver: 1, seq: 1, val: {
-      llmMs: o.llmMs ?? 90000,
+      llmMs: o.llmMs ?? 90000, steps: o.steps ?? 7,
       decodeMs: o.decodeMs ?? 60000, decodeTokens: o.out ?? 50,
     } },
+    timeContext: { ver: 1, seq: 1, val: { lastMessageTime: o.lastMessageTime ?? 1793610999999 } },
     modelSelection: { ver: 1, seq: 1, val: o.model === null ? {} : { lastUsed: { model: o.model ?? 'deepseek-flash' } } },
   };
   return JSON.stringify({
@@ -52,11 +53,11 @@ async function write(name: string, content: string): Promise<{ path: string; mti
   return { path: p, mtimeMs: st.mtimeMs, size: st.size };
 }
 
-test('parses a full session document', async () => {
+test('parses cumulative session totals without inventing requests', async () => {
   const f = await write('session-abc12345-xxxx.jsonl'.replace('.jsonl', '.json'), dshDoc({
-    createdAt: 1793610928929, cwd: 'C:\\work\\maotai',
+    createdAt: 1793610928929, lastMessageTime: 1793610999999, cwd: 'C:\\work\\maotai',
     uncached: 100741, out: 13077, cacheRead: 1561216, cacheWrite: 0,
-    decodeMs: 66997, model: 'deepseek-flash',
+    decodeMs: 66997, steps: 355, model: 'deepseek-flash',
   }));
   const recs = await dshAdapter.parse(root, f);
   assert.equal(recs.length, 1);
@@ -64,20 +65,22 @@ test('parses a full session document', async () => {
   assert.equal(r.src, 'dsh');
   assert.equal(r.sid, 'abc12345-xxxx'); // session- prefix stripped
   assert.equal(r.proj, 'C:\\work\\maotai');
-  assert.equal(r.ts, 1793610928929);
+  assert.equal(r.ts, 1793610999999);
   assert.equal(r.model, 'deepseek-flash');
   assert.equal(r.inTok, 100741);
   assert.equal(r.outTok, 13077);
   assert.equal(r.cacheRead, 1561216);
   assert.equal(r.cacheWrite, 0);
-  assert.equal(r.durMs, 66997); // real decode time
+  assert.equal(r.durMs, 66997); // real cumulative decode time
   assert.equal(r.reasonTok, 0);
+  assert.equal(r.kind, 'session');
+  assert.equal(r.requestCount, 355);
 });
 
-test('falls back to llmMs when decodeMs missing', async () => {
+test('does not substitute llmMs for missing decode duration', async () => {
   const f = await write('plain-id.json', dshDoc({ decodeMs: 0, llmMs: 123456 }));
   const recs = await dshAdapter.parse(root, f);
-  assert.equal(recs[0].durMs, 123456);
+  assert.equal(recs[0].durMs, 0);
 });
 
 test('defaults model to deepseek when modelSelection absent', async () => {

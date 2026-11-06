@@ -18,13 +18,23 @@ export function windowRange(w: WindowKey, now: number): { from: number; to: numb
   }
 }
 
+export function isRequestRecord(record: TurnRecord): boolean {
+  return record.kind !== 'session';
+}
+
+export function requestCount(record: TurnRecord): number {
+  return isRequestRecord(record) ? 1 : Math.max(0, record.requestCount ?? 0);
+}
+
 export function applyFilters(
   records: TurnRecord[],
   src: SourceId | 'all',
   range: { from: number; to: number },
 ): TurnRecord[] {
   return records.filter(
-    (r) => (src === 'all' || r.src === src) && r.ts >= range.from && r.ts <= range.to,
+    (r) => (src === 'all' || r.src === src) && r.ts >= range.from && r.ts <= range.to &&
+      // A session total has no defensible distribution over a bounded time window.
+      (range.to === Number.POSITIVE_INFINITY || isRequestRecord(r)),
   );
 }
 
@@ -41,6 +51,7 @@ export interface SourceSummary {
   sessions: number;
   activeMs: number;
   spark: number[];
+  cumulative: boolean;
 }
 
 function median(values: number[]): number | null {
@@ -61,6 +72,7 @@ export function sourceSummaries(records: TurnRecord[], sparkBuckets = 32): Sourc
   }
   const out: SourceSummary[] = [];
   for (const [src, list] of bySrc) {
+    const timed = list.filter(isRequestRecord);
     const outTok = list.reduce((s, r) => s + r.outTok, 0);
     const inTok = list.reduce((s, r) => s + r.inTok, 0);
     const cacheRead = list.reduce((s, r) => s + r.cacheRead, 0);
@@ -69,14 +81,15 @@ export function sourceSummaries(records: TurnRecord[], sparkBuckets = 32): Sourc
     out.push({
       src,
       avgTps: activeMs > 0 ? (outTok / activeMs) * 1000 : null,
-      medianTps: median(usable.map((r) => (r.outTok / r.durMs) * 1000)),
+      medianTps: median(timed.filter((r) => r.durMs > 0).map((r) => (r.outTok / r.durMs) * 1000)),
       usablePct: list.length > 0 ? usable.length / list.length : 0,
       inTok, outTok, cacheRead,
       cacheWrite: list.reduce((s, r) => s + r.cacheWrite, 0),
-      reqs: list.length,
+      reqs: list.reduce((s, r) => s + requestCount(r), 0),
       sessions: new Set(list.map((r) => r.sid)).size,
       activeMs,
-      spark: spark(list, sparkBuckets),
+      spark: spark(timed, sparkBuckets),
+      cumulative: timed.length === 0,
     });
   }
   return out;
@@ -110,7 +123,7 @@ export function buckets(records: TurnRecord[], range: { from: number; to: number
     in: {},
   }));
   for (const r of records) {
-    if (r.ts < range.from || r.ts > range.to) continue;
+    if (!isRequestRecord(r) || r.ts < range.from || r.ts > range.to) continue;
     const idx = Math.min(n - 1, Math.floor(((r.ts - range.from) / span) * n));
     bs[idx].out[r.src] = (bs[idx].out[r.src] ?? 0) + r.outTok;
     bs[idx].in[r.src] = (bs[idx].in[r.src] ?? 0) + r.inTok;
@@ -153,12 +166,12 @@ export function modelStats(records: TurnRecord[]): ModelRow[] {
     rows.push({
       model,
       srcs: [...new Set(list.map((r) => r.src))],
-      reqs: list.length,
+      reqs: list.reduce((s, r) => s + requestCount(r), 0),
       inTok: list.reduce((s, r) => s + r.inTok, 0),
       outTok,
       cacheRead: list.reduce((s, r) => s + r.cacheRead, 0),
       avgTps: activeMs > 0 ? (outTok / activeMs) * 1000 : null,
-      peakTps: p95(list.filter((r) => r.durMs > 0).map((r) => r.outTok / r.durMs * 1000)),
+      peakTps: p95(list.filter((r) => isRequestRecord(r) && r.durMs > 0).map((r) => r.outTok / r.durMs * 1000)),
       share: totalOut > 0 ? outTok / totalOut : 0,
     });
   }
@@ -203,7 +216,7 @@ export function latestSessions(records: TurnRecord[], n: number): SessionRow[] {
       lastTs: last,
       outTok,
       totalTok: list.reduce((s, r) => s + r.inTok + r.outTok + r.cacheRead + r.cacheWrite, 0),
-      reqs: list.length,
+      reqs: list.reduce((s, r) => s + requestCount(r), 0),
       avgTps: activeMs > 0 ? (outTok / activeMs) * 1000 : null,
     });
   }

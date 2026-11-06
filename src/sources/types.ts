@@ -18,6 +18,10 @@ export interface TurnRecord {
   outTok: number;
   reasonTok: number;
   durMs: number;
+  /** Session-only totals cannot be attributed to individual requests or time buckets. */
+  kind?: 'session';
+  /** Actual model calls represented by a cumulative session record. */
+  requestCount?: number;
 }
 
 export interface SourceAdapter {

@@ -50,17 +50,22 @@ export const dshAdapter: SourceAdapter = {
 
     const totals = rows.tokenUsage?.val?.totals ?? {};
     const stats = rows.sessionStats?.val ?? {};
+    // llmMs includes waiting/TTFT and is not a valid decode-duration fallback.
     const decodeMs = typeof stats.decodeMs === 'number' && stats.decodeMs > 0
       ? stats.decodeMs
-      : (typeof stats.llmMs === 'number' && stats.llmMs > 0 ? stats.llmMs : 1000);
+      : 0;
     const model = rows.modelSelection?.val?.lastUsed?.model;
+    const lastMessageTime = rows.timeContext?.val?.lastMessageTime;
+    const steps = stats.steps;
 
     const name = path.basename(file.path, '.json');
     return [{
       src: 'dsh',
       sid: name.startsWith('session-') ? name.slice('session-'.length) : name,
       proj: typeof identity.cwd === 'string' ? identity.cwd : '',
-      ts: typeof identity.createdAt === 'number' ? identity.createdAt : 0,
+      ts: typeof lastMessageTime === 'number' && lastMessageTime > 0
+        ? lastMessageTime
+        : (typeof identity.createdAt === 'number' ? identity.createdAt : 0),
       model: typeof model === 'string' ? model : 'deepseek',
       inTok: totals.uncachedInputTokens ?? 0,
       cacheRead: totals.cacheReadTokens ?? 0,
@@ -68,6 +73,10 @@ export const dshAdapter: SourceAdapter = {
       outTok: totals.outputTokens ?? 0,
       reasonTok: 0,
       durMs: decodeMs,
+      kind: 'session',
+      requestCount: typeof steps === 'number' && Number.isFinite(steps) && steps >= 0
+        ? Math.floor(steps)
+        : 0,
     }];
   },
 };

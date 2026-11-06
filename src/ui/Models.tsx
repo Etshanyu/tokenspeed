@@ -8,6 +8,8 @@ import { Table } from './comp/Table.tsx';
 import type { Column } from './comp/Table.tsx';
 import { gaugeBar } from './comp/chart.ts';
 import { fmtPct, fmtTok, fmtTps } from '../util/fmt.ts';
+import { t } from './i18n.ts';
+import type { Language } from './i18n.ts';
 
 export interface ModelsProps {
   records: TurnRecord[];
@@ -17,6 +19,7 @@ export interface ModelsProps {
   win?: WindowKey;
   sort: { col: number; dir: 1 | -1 };
   onSort: (col: number) => void;
+  lang?: Language;
 }
 
 interface DisplayRow {
@@ -28,25 +31,27 @@ function fmtMetricTok(value: number): string {
   return fmtTok(value).replace(/k$/, 'K');
 }
 
-const COLUMNS: Column<DisplayRow>[] = [
-  { key: 'model', header: 'MODEL', width: 22, render: (r) => r.model },
-  { key: 'srcs', header: 'SOURCE', width: 8, render: (r) => r.srcs },
-  { key: 'reqs', header: 'REQS', width: 5, align: 'r', render: (r) => String(r.reqs) },
-  { key: 'inTok', header: 'INPUT', width: 7, align: 'r', render: (r) => fmtMetricTok(r.inTok) },
-  { key: 'outTok', header: 'OUTPUT', width: 7, align: 'r', render: (r) => fmtMetricTok(r.outTok) },
-  { key: 'cacheRead', header: 'CACHE', width: 7, align: 'r', render: (r) => fmtMetricTok(r.cacheRead) },
-  { key: 'avgTps', header: 'AVG TPS', width: 7, align: 'r', render: (r) => fmtTps(r.avgTps) },
-  { key: 'peakTps', header: 'PEAK TPS', width: 8, align: 'r', render: (r) => fmtTps(r.peakTps) },
-  {
-    key: 'share', header: 'SHARE', width: 14, render: (r) => {
-      const bar = gaugeBar(r.share, 1, 7, '█', '░');
-      return `${bar} ${fmtPct(r.share).padStart(6)}`;
+function modelColumns(lang: Language): Column<DisplayRow>[] {
+  return [
+    { key: 'model', header: t(lang, 'modelColumn'), width: 22, render: (r) => r.model },
+    { key: 'srcs', header: t(lang, 'sourceColumn'), width: 8, render: (r) => r.srcs },
+    { key: 'reqs', header: t(lang, 'reqs'), width: lang === 'zh' ? 6 : 5, align: 'r', render: (r) => String(r.reqs) },
+    { key: 'inTok', header: t(lang, 'inputColumn'), width: 7, align: 'r', render: (r) => fmtMetricTok(r.inTok) },
+    { key: 'outTok', header: t(lang, 'outputColumn'), width: 7, align: 'r', render: (r) => fmtMetricTok(r.outTok) },
+    { key: 'cacheRead', header: t(lang, 'cache'), width: 7, align: 'r', render: (r) => fmtMetricTok(r.cacheRead) },
+    { key: 'avgTps', header: t(lang, 'avgTps'), width: lang === 'zh' ? 8 : 7, align: 'r', render: (r) => fmtTps(r.avgTps) },
+    { key: 'peakTps', header: t(lang, 'peakTps'), width: 8, align: 'r', render: (r) => fmtTps(r.peakTps) },
+    {
+      key: 'share', header: t(lang, 'share'), width: 14, render: (r) => {
+        const bar = gaugeBar(r.share, 1, 7, '█', '░');
+        return `${bar} ${fmtPct(r.share).padStart(6)}`;
+      },
     },
-  },
-];
+  ];
+}
 
 export function Models(props: ModelsProps): React.ReactElement {
-  const { records, now, theme, srcFilter, win = '7d', sort } = props;
+  const { records, now, theme, srcFilter, win = '7d', sort, lang = 'en' } = props;
   const filtered = applyFilters(records, srcFilter, windowRange(win, now));
   const stats = modelStats(filtered);
   const rows: DisplayRow[] = stats.map((m) => ({
@@ -62,7 +67,8 @@ export function Models(props: ModelsProps): React.ReactElement {
     share: m.share,
   }));
 
-  const col = COLUMNS[Math.min(sort.col, COLUMNS.length - 1)];
+  const columns = modelColumns(lang);
+  const col = columns[Math.min(sort.col, columns.length - 1)];
   const key = col.key as keyof DisplayRow;
   const sorted = [...rows].sort((a, b) => {
     const av = a[key];
@@ -75,7 +81,7 @@ export function Models(props: ModelsProps): React.ReactElement {
   });
   const direction = sort.dir === -1 ? '▼' : '▲';
   const totalOutput = rows.reduce((sum, row) => sum + row.outTok, 0);
-  const coloredColumns = COLUMNS.map((c) => {
+  const coloredColumns = columns.map((c) => {
     if (c.key === 'srcs' || c.key === 'share') {
       return { ...c, color: (row: DisplayRow) => (row.src ? theme.srcColors[row.src] : theme.accent) };
     }
@@ -87,15 +93,15 @@ export function Models(props: ModelsProps): React.ReactElement {
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
-      <Text bold color={theme.text}>MODELS <Text color={theme.dim}>· token usage & request throughput</Text></Text>
+      <Text bold color={theme.text}>{t(lang, 'pageModels').toUpperCase()} <Text color={theme.dim}>· {t(lang, 'modelsSubtitle')}</Text></Text>
       {sorted.length === 0 ? (
         <Box marginY={1}>
-          <Text color={theme.dim}>no models in window —</Text>
+          <Text color={theme.dim}>{t(lang, 'noModelsWindow')}</Text>
         </Box>
       ) : (
         <>
-          <Text color={theme.dim}>{rows.length} models · {filtered.length} requests · {fmtMetricTok(totalOutput)} output · {srcFilter === 'all' ? 'all sources' : srcFilter}</Text>
-          <Text color={theme.dim}>SORT <Text color={theme.text}>{col.header} {direction}</Text> · {sort.dir === -1 ? 'descending' : 'ascending'}</Text>
+          <Text color={theme.dim}>{rows.length} {t(lang, 'models')} · {filtered.reduce((sum, r) => sum + (r.kind === 'session' ? (r.requestCount ?? 0) : 1), 0)} {t(lang, 'requests')} · {fmtMetricTok(totalOutput)} {t(lang, 'output')} · {srcFilter === 'all' ? t(lang, 'allSources') : srcFilter}</Text>
+          <Text color={theme.dim}>{t(lang, 'sortLabel')} <Text color={theme.text}>{col.header} {direction}</Text> · {t(lang, sort.dir === -1 ? 'descending' : 'ascending')}</Text>
           <Box flexDirection="column" marginTop={1}>
             <Table
               columns={coloredColumns.map((c, i) =>
@@ -110,8 +116,8 @@ export function Models(props: ModelsProps): React.ReactElement {
             />
           </Box>
           <Box flexDirection="column" marginTop={1}>
-            <Text color={theme.dim}>AVG TPS / PEAK TPS = output tokens / second · SHARE = output-token share</Text>
-            <Text color={theme.dim}>←/→ sort column · Enter flip direction</Text>
+            <Text color={theme.dim}>{t(lang, 'modelTimingNote')}</Text>
+            <Text color={theme.dim}>{t(lang, 'shareSortNote')}</Text>
           </Box>
         </>
       )}

@@ -72,6 +72,20 @@ test('empty records render no-models state', () => {
   assert.ok(frame.includes('no models'));
 });
 
+test('models table translates headers and sorting into Chinese', () => {
+  const inst = render(
+    <Models records={records} now={NOW} theme={THEMES[0]} srcFilter="all" sort={{ col: 4, dir: -1 }} onSort={() => {}} lang="zh" />,
+  );
+  const frame = inst.lastFrame()!;
+  inst.unmount();
+  assert.ok(frame.includes('Token 用量与估算吞吐'));
+  assert.ok(frame.includes('请求数'));
+  assert.ok(frame.includes('平均 TPS'));
+  assert.ok(frame.includes('排序'));
+  assert.ok(frame.includes('降序'));
+  assert.ok(frame.includes('占比 = 输出 Token 比例'));
+});
+
 test('active sort column shows direction marker without truncating the header', () => {
   const inst = render(
     <Models records={records} now={NOW} theme={THEMES[0]} srcFilter="all" sort={{ col: 2, dir: -1 }} onSort={() => {}} />,

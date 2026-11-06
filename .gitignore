@@ -1,4 +1,11 @@
 node_modules/
+dist/
 .data/
+.venv/
+.tokenspeed-cache/
+__pycache__/
+*.py[cod]
+*.tgz
 *.log
 .superpowers/
+NVIDIA Corporation/

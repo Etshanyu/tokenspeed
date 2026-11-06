@@ -2,7 +2,7 @@ import { promises as fs, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { FileEntry, SourceAdapter, TurnRecord } from '../sources/types.ts';
 
-export const CACHE_VERSION = 1;
+export const CACHE_VERSION = 2;
 
 export interface IndexStore {
   version: number;

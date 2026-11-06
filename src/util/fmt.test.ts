@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  fmtTok, fmtDur, fmtTps, fmtPct,
-  displayWidth, truncateToWidth, projShort, sidShort,
+  fmtTok, fmtDur, fmtAgo, fmtTps, fmtPct,
+  displayWidth, sanitizeText, truncateToWidth, projShort, sidShort,
 } from './fmt.ts';
 
 test('fmtTok keeps small numbers raw', () => {
@@ -24,6 +24,15 @@ test('fmtDur renders human time spans', () => {
   assert.equal(fmtDur(12_600_000), '3h30m'); // screenshot style 5h08m
   assert.equal(fmtDur(18_000_000), '5h00m');
   assert.equal(fmtDur(190_800_000), '2d5h');
+});
+
+test('Chinese durations and freshness use localized units', () => {
+  assert.equal(fmtDur(42_000, 'zh'), '42秒');
+  assert.equal(fmtDur(87_000, 'zh'), '1分27秒');
+  assert.equal(fmtDur(12_600_000, 'zh'), '3小时30分');
+  assert.equal(fmtAgo(42_000, 'zh'), '42秒');
+  assert.equal(fmtAgo(3_720_000, 'zh'), '1小时02分');
+  assert.equal(fmtAgo(172_800_000, 'zh'), '2天');
 });
 
 test('fmtTps null becomes em-dash, decimals by magnitude', () => {
@@ -48,6 +57,13 @@ test('truncateToWidth cuts CJK strings to display width with ellipsis', () => {
   assert.ok(out.endsWith('…'));
   assert.ok(displayWidth(out) <= 5);
   assert.equal(truncateToWidth('ab', 5), 'ab');
+});
+
+test('terminal control sequences from log fields are stripped', () => {
+  assert.equal(sanitizeText('model\x1b[2J\x1b[31m-name'), 'model-name');
+  assert.equal(sanitizeText('safe\x1b]0;title\x07text'), 'safetext');
+  assert.equal(truncateToWidth('bad\x1b[2Jmodel', 20), 'badmodel');
+  assert.equal(sanitizeText('line\nfeed'), 'linefeed');
 });
 
 test('projShort returns last dash segment', () => {

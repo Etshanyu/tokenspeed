@@ -19,32 +19,43 @@ export function fmtTok(n: number): string {
   return String(n);
 }
 
-/** 42s / 1m27s / 5h08m / 2d5h — screenshot duration style */
-export function fmtDur(ms: number): string {
+/** Compact English or Chinese duration. */
+export function fmtDur(ms: number, lang: 'en' | 'zh' = 'en'): string {
   const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
+  if (s < 60) return lang === 'zh' ? `${s}秒` : `${s}s`;
   const m = Math.floor(s / 60);
-  if (m < 60) return s % 60 === 0 ? `${m}m` : `${m}m${s % 60}s`;
+  if (m < 60) {
+    if (lang === 'zh') return s % 60 === 0 ? `${m}分` : `${m}分${s % 60}秒`;
+    return s % 60 === 0 ? `${m}m` : `${m}m${s % 60}s`;
+  }
   if (m < 1440) {
     const h = Math.floor(m / 60);
-    return `${h}h${String(m % 60).padStart(2, '0')}m`;
+    return lang === 'zh'
+      ? `${h}小时${String(m % 60).padStart(2, '0')}分`
+      : `${h}h${String(m % 60).padStart(2, '0')}m`;
   }
   const d = Math.floor(m / 1440);
-  return `${d}d${Math.floor((m % 1440) / 60)}h`;
+  return lang === 'zh' ? `${d}天${Math.floor((m % 1440) / 60)}小时` : `${d}d${Math.floor((m % 1440) / 60)}h`;
 }
 
-/** freshness suffix for the header clock: 27s / 4m05s / 1h12m / 2d */
-export function fmtAgo(ms: number): string {
-  if (ms < 60_000) return `${Math.max(0, Math.floor(ms / 1000))}s`;
+/** Freshness suffix for the header clock. */
+export function fmtAgo(ms: number, lang: 'en' | 'zh' = 'en'): string {
+  if (ms < 60_000) {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    return lang === 'zh' ? `${s}秒` : `${s}s`;
+  }
   if (ms < 3_600_000) {
     const m = Math.floor(ms / 60_000);
-    return `${m}m${String(Math.floor((ms % 60_000) / 1000)).padStart(2, '0')}s`;
+    const s = String(Math.floor((ms % 60_000) / 1000)).padStart(2, '0');
+    return lang === 'zh' ? `${m}分${s}秒` : `${m}m${s}s`;
   }
   if (ms < 86_400_000) {
     const h = Math.floor(ms / 3_600_000);
-    return `${h}h${String(Math.floor((ms % 3_600_000) / 60_000)).padStart(2, '0')}m`;
+    const m = String(Math.floor((ms % 3_600_000) / 60_000)).padStart(2, '0');
+    return lang === 'zh' ? `${h}小时${m}分` : `${h}h${m}m`;
   }
-  return `${Math.floor(ms / 86_400_000)}d`;
+  const d = Math.floor(ms / 86_400_000);
+  return lang === 'zh' ? `${d}天` : `${d}d`;
 }
 
 /** null→"—"; <100 keep 1 decimal; ≥100 integer */
@@ -59,14 +70,23 @@ export function fmtPct(x: number): string {
   return stripTrailingZero((x * 100).toFixed(1)) + '%';
 }
 
+/** Remove control sequences originating in logs before they reach the terminal. */
+export function sanitizeText(value: string): string {
+  return value
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '')
+    .replace(/[\x00-\x1f\x7f-\x9f]/g, '');
+}
+
 /** Terminal display width (CJK counts 2). */
 export function displayWidth(s: string): number {
   return stringWidth(s);
 }
 
-/** Truncate to display width w with a trailing ellipsis when needed. */
-export function truncateToWidth(s: string, w: number): string {
+/** Sanitize and truncate to display width w with a trailing ellipsis when needed. */
+export function truncateToWidth(value: string, w: number): string {
   if (w < 1) return '';
+  const s = sanitizeText(value);
   if (displayWidth(s) <= w) return s;
   let out = '';
   let width = 0;

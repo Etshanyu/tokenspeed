@@ -1,10 +1,11 @@
+#!/usr/bin/env node
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, render, Text } from 'ink';
 import Spinner from 'ink-spinner';
 import { parseArgs } from 'node:util';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { ADAPTERS } from './sources/index.ts';
 import type { SourceAdapter, TurnRecord } from './sources/types.ts';
 import { loadCache, saveCache, scanAll } from './scan/indexer.ts';
@@ -13,8 +14,39 @@ import { startWatch } from './scan/watcher.ts';
 import { App } from './ui/App.tsx';
 import { THEMES } from './theme.ts';
 import type { WindowKey } from './agg/metrics.ts';
+import { clearStoredCache, defaultCacheDir, loadPreferences, savePreferences } from './config.ts';
+import type { Preferences } from './config.ts';
 
-const VERSION = '0.1.0';
+export const VERSION = '0.1.0';
+
+export const HELP = `TOKEN SPEED ${VERSION} — local token telemetry
+
+Usage:
+  tokenspeed [options]
+
+Options:
+  --page <name>       overview | timeline | models | requests
+  --source <name>     all | codex | claude | dsh
+  --window <range>    today | 7d | 30d | all
+  --theme <name|#>    theme name or zero-based index
+  --lang <language>   en | zh
+  --home <path>       home containing .claude, .codex and .dsh
+  --cache-dir <path>  writable cache and preference directory
+  --no-live           disable file watching and automatic refreshes
+  --rescan            ignore cached records and parse all sources
+  --clear-cache       delete the record cache, then exit
+  --help              show this help
+  --version           show the version
+
+Environment:
+  TOKENSPEED_HOME       same as --home
+  TOKENSPEED_CACHE_DIR  same as --cache-dir
+  TOKENSPEED_DEBUG=1    print non-fatal scan and preference errors
+
+Keys:
+  F1-F4 / Tab pages · 1-4 source · t/w/a window · arrows navigate
+  Enter sort · l language · r refresh · x theme · q quit
+`;
 
 export async function buildRuntime(opts: {
   root: string;
@@ -58,6 +90,7 @@ function Root(props: {
   initSrc: string;
   initWin: WindowKey;
   initTheme: number;
+  initLang: 'en' | 'zh';
 }): React.ReactElement {
   const [records, setRecords] = useState(props.initialRecords);
   const [lastRefresh, setLastRefresh] = useState(Date.now());
@@ -108,51 +141,86 @@ function Root(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.live, props.root]);
 
+  const onStateChange = (next: Preferences): void => savePreferences(props.cacheDir, next);
+
   return (
     <App
       records={records}
       live={props.live}
       lastRefresh={lastRefresh}
       now={now}
+      home={props.root}
       onRefresh={() => { void rescan(); }}
-      initial={{ page: props.initPage, srcFilter: props.initSrc, win: props.initWin, themeIdx: props.initTheme }}
+      onStateChange={onStateChange}
+      initial={{ page: props.initPage, srcFilter: props.initSrc, win: props.initWin, themeIdx: props.initTheme, lang: props.initLang }}
     />
   );
 }
 
 async function main(): Promise<void> {
-  const { values } = parseArgs({
-    options: {
-      page: { type: 'string' },
-      source: { type: 'string' },
-      window: { type: 'string' },
-      'no-live': { type: 'boolean' },
-      rescan: { type: 'boolean' },
-      theme: { type: 'string' },
-    },
-  });
-  const root = process.env.TOKENSPEED_HOME ?? homedir();
-  const cacheDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.data');
-
-  const boot = render(<Boot />);
+  let boot: ReturnType<typeof render> | null = null;
   try {
+    const { values } = parseArgs({
+      options: {
+        page: { type: 'string' },
+        source: { type: 'string' },
+        window: { type: 'string' },
+        lang: { type: 'string' },
+        home: { type: 'string' },
+        'cache-dir': { type: 'string' },
+        'no-live': { type: 'boolean' },
+        rescan: { type: 'boolean' },
+        'clear-cache': { type: 'boolean' },
+        theme: { type: 'string' },
+        help: { type: 'boolean' },
+        version: { type: 'boolean' },
+      },
+    });
+    if (values.help) {
+      process.stdout.write(HELP);
+      return;
+    }
+    if (values.version) {
+      process.stdout.write(`${VERSION}\n`);
+      return;
+    }
+
+    const cacheDir = values['cache-dir']
+      ? path.resolve(String(values['cache-dir']))
+      : defaultCacheDir();
+    if (values['clear-cache']) {
+      clearStoredCache(cacheDir);
+      process.stdout.write(`Token Speed cache cleared: ${path.join(cacheDir, 'index.json')}\n`);
+      return;
+    }
+
+    const root = values.home ? path.resolve(String(values.home)) : (process.env.TOKENSPEED_HOME ?? homedir());
+    const preferences = loadPreferences(cacheDir);
+    const pageValue = values.page ?? preferences.page;
+    const page = ['overview', 'timeline', 'models', 'requests'].includes(String(pageValue))
+      ? (pageValue as 'overview' | 'timeline' | 'models' | 'requests') : 'overview';
+    const winValue = values.window ?? preferences.win;
+    const win: WindowKey = ['today', '7d', '30d', 'all'].includes(String(winValue))
+      ? (winValue as WindowKey) : '7d';
+    const srcValue = values.source ?? preferences.srcFilter ?? 'all';
+    const src = ADAPTERS.some((a) => a.id === srcValue) || srcValue === 'all' ? String(srcValue) : 'all';
+    const langValue = values.lang ?? preferences.lang ?? 'en';
+    const lang = langValue === 'zh' ? 'zh' : 'en';
+    // --theme accepts a name ("vapor") or an index (1)
+    const themeArg = String(values.theme ?? '');
+    const themeIdx = !themeArg
+      ? Math.min(preferences.themeIdx ?? 0, THEMES.length - 1)
+      : /^\d+$/.test(themeArg)
+        ? Math.min(Math.max(0, parseInt(themeArg, 10)), THEMES.length - 1)
+        : Math.max(0, THEMES.findIndex((theme) => theme.name === themeArg));
+
+    boot = render(<Boot />);
     const { records } = await buildRuntime({
       root, cacheDir, rescan: values.rescan === true,
     });
     boot.clear();
     boot.unmount();
-
-    const page = ['overview', 'timeline', 'models', 'requests'].includes(String(values.page))
-      ? (values.page as 'overview' | 'timeline' | 'models' | 'requests') : 'overview';
-    const win: WindowKey = ['today', '7d', '30d', 'all'].includes(String(values.window))
-      ? (values.window as WindowKey) : '7d';
-    const src = ADAPTERS.some((a) => a.id === values.source) || values.source === 'all'
-      ? String(values.source ?? 'all') : 'all';
-    // --theme accepts a name ("vapor") or an index (1)
-    const themeArg = String(values.theme ?? '');
-    const themeIdx = /^\d+$/.test(themeArg)
-      ? Math.min(Math.max(0, parseInt(themeArg, 10)), THEMES.length - 1)
-      : Math.max(0, THEMES.findIndex((t) => t.name === themeArg));
+    boot = null;
 
     render(
       <Root
@@ -164,13 +232,14 @@ async function main(): Promise<void> {
         initSrc={src}
         initWin={win}
         initTheme={themeIdx}
+        initLang={lang}
       />,
     );
   } catch (err) {
-    boot.clear();
-    boot.unmount();
+    boot?.clear();
+    boot?.unmount();
     console.error('tokenspeed failed to start:', err);
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 

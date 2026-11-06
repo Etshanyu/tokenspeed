@@ -9,6 +9,7 @@ export type KeyAction =
   | { t: 'win'; w: WindowKey }
   | { t: 'winCycle' }
   | { t: 'theme' }
+  | { t: 'lang' }
   | { t: 'refresh' }
   | { t: 'quit' }
   | { t: 'tab' }
@@ -42,10 +43,49 @@ export function parseKey(buf: string): KeyAction | null {
     case 'a': return { t: 'win', w: 'all' };
     case 'r': return { t: 'refresh' };
     case 'x': return { t: 'theme' };
+    case 'l': case 'L': return { t: 'lang' };
     case 'q': case '\x03': return { t: 'quit' };
   }
   if (/^[1-9]$/.test(buf)) return { t: 'src', key: buf };
   return null;
+}
+
+/**
+ * Decode a raw stdin stream. A chunk may contain several keys, and terminal
+ * escape sequences may be split across chunks; neither should drop a keypress.
+ */
+export function createKeyDecoder(): (chunk: string) => KeyAction[] {
+  let pending = '';
+  return (chunk: string): KeyAction[] => {
+    pending += chunk;
+    const actions: KeyAction[] = [];
+    while (pending.length > 0) {
+      let token = pending[0];
+      if (pending.startsWith('\x1bO')) {
+        if (pending.length < 3) break;
+        token = pending.slice(0, 3);
+      } else if (pending.startsWith('\x1b[')) {
+        // CSI sequences end at the first byte in the 0x40-0x7e range.
+        let end = -1;
+        for (let i = 2; i < pending.length; i++) {
+          const code = pending.charCodeAt(i);
+          if (code >= 0x40 && code <= 0x7e) {
+            end = i;
+            break;
+          }
+        }
+        if (end < 0) break;
+        token = pending.slice(0, end + 1);
+      } else if (pending[0] === '\x1b') {
+        if (pending.length < 2) break;
+        token = pending.slice(0, 2);
+      }
+      const action = parseKey(token);
+      if (action) actions.push(action);
+      pending = pending.slice(token.length);
+    }
+    return actions;
+  };
 }
 
 export function cyclePage(p: Page, dir: 1 | -1): Page {

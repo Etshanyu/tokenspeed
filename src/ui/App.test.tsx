@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import React from 'react';
 import { render } from 'ink-testing-library';
 import { initialState, appReducer, App } from './App.tsx';
@@ -103,4 +106,92 @@ test('initial page opens the requested view directly', () => {
   inst.unmount();
   assert.ok(frame.includes('TIMELINE'));
   assert.ok(!frame.includes('ACTIVITY MAP'));
+});
+
+test('reducer toggles language in both directions', () => {
+  let s = initialState();
+  assert.equal(s.lang, 'en');
+  s = act(s, { t: 'lang' });
+  assert.equal(s.lang, 'zh');
+  s = act(s, { t: 'lang' });
+  assert.equal(s.lang, 'en');
+});
+
+test('Chinese shell translates navigation, panels and shortcuts', () => {
+  const inst = render(
+    <App records={[]} now={new Date('2026-11-05T12:00:00').getTime()} initial={{ lang: 'zh' }} />,
+  );
+  const frame = inst.lastFrame()!;
+  inst.unmount();
+  assert.ok(frame.includes('F1 概览'));
+  assert.ok(frame.includes('F2 时间线'));
+  assert.ok(frame.includes('F3 模型'));
+  assert.ok(frame.includes('F4 请求'));
+  assert.ok(frame.includes('活动图'));
+  assert.ok(frame.includes('模型使用'));
+  assert.ok(frame.includes('l EN'));
+  assert.ok(frame.includes('q 退出'));
+});
+
+const flushInput = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+test('Ink stdin handles language switching and tab navigation', async () => {
+  let current: { page: string; srcFilter: string; lang: string } | undefined;
+  const inst = render(
+    <App
+      records={[]}
+      now={new Date('2026-11-05T12:00:00').getTime()}
+      onStateChange={(next) => { current = next; }}
+    />,
+  );
+  try {
+    await flushInput();
+    inst.stdin.write('l');
+    await flushInput();
+    assert.ok(inst.lastFrame()!.includes('F1 概览'));
+
+    inst.stdin.write('\t');
+    await flushInput();
+    assert.equal(current?.page, 'timeline');
+
+    inst.stdin.write('L');
+    await flushInput();
+    assert.equal(current?.lang, 'en');
+    assert.ok(inst.lastFrame()!.includes('F1 Overview'));
+  } finally {
+    inst.unmount();
+  }
+});
+
+test('Ink stdin handles chained source keys, returning to 1 and chained language keys', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'tokenspeed-input-'));
+  mkdirSync(join(home, '.codex'));
+  mkdirSync(join(home, '.claude', 'projects'), { recursive: true });
+  mkdirSync(join(home, '.dsh', 'storages', 'session_projcache', 'sessions'), { recursive: true });
+  let current: { page: string; srcFilter: string; lang: string } | undefined;
+  const inst = render(
+    <App
+      records={[]}
+      home={home}
+      now={new Date('2026-11-05T12:00:00').getTime()}
+      onStateChange={(next) => { current = next; }}
+    />,
+  );
+  try {
+    await flushInput();
+    inst.stdin.write('2341lL');
+    await flushInput();
+    assert.equal(current?.srcFilter, 'all');
+    assert.equal(current?.lang, 'en');
+
+    inst.stdin.write('4');
+    await flushInput();
+    assert.equal(current?.srcFilter, 'dsh');
+    inst.stdin.write('1');
+    await flushInput();
+    assert.equal(current?.srcFilter, 'all');
+  } finally {
+    inst.unmount();
+    rmSync(home, { recursive: true, force: true });
+  }
 });

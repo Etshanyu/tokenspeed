@@ -46,6 +46,19 @@ test('timeline empty window renders no-activity state', () => {
   assert.ok(frame.includes('no activity'));
 });
 
+test('timeline translates labels and summaries into Chinese', () => {
+  const inst = render(
+    <Timeline records={week} now={NOW} theme={THEMES[0]} srcFilter="all" win="7d" lang="zh" />,
+  );
+  const frame = inst.lastFrame()!;
+  inst.unmount();
+  assert.ok(frame.includes('时间线'));
+  assert.ok(frame.includes('每 6 小时分桶'));
+  assert.ok(frame.includes('缓存读取'));
+  assert.ok(frame.includes('峰值'));
+  assert.ok(frame.includes('5 桶移动趋势'));
+});
+
 test('timeline uses plan bucket counts (7d -> 28 buckets) regardless of width', () => {
   const inst = render(
     <Timeline records={week} now={NOW} theme={THEMES[0]} srcFilter="all" win="7d" />,

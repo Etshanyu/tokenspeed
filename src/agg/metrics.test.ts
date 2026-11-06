@@ -41,6 +41,33 @@ test('applyFilters filters by source and time range', () => {
   assert.equal(all.length, 3);
 });
 
+test('session totals stay out of bounded windows, timelines and per-request peaks', () => {
+  const request = rec({ src: 'claude', sid: 'a', ts: NOW - 1000, outTok: 100, durMs: 2000 });
+  const total = rec({
+    src: 'dsh', sid: 'd', ts: NOW - 1000, model: 'dsh-model', outTok: 600, durMs: 3000,
+    kind: 'session', requestCount: 17,
+  });
+  assert.deepEqual(applyFilters([request, total], 'all', windowRange('today', NOW)), [request]);
+  assert.equal(applyFilters([request, total], 'all', windowRange('all', NOW)).length, 2);
+
+  const [summary] = sourceSummaries([total]);
+  assert.equal(summary.reqs, 17);
+  assert.equal(summary.avgTps, 200);
+  assert.equal(summary.medianTps, null);
+  assert.equal(summary.cumulative, true);
+  assert.deepEqual(summary.spark, []);
+
+  const bs = buckets([request, total], { from: NOW - 2000, to: NOW }, 2);
+  assert.equal(bs.reduce((sum, b) => sum + (b.out.dsh ?? 0), 0), 0);
+  assert.equal(bs.reduce((sum, b) => sum + (b.out.claude ?? 0), 0), 100);
+
+  const models = modelStats([request, total]);
+  assert.equal(models.find((m) => m.srcs[0] === 'dsh')!.reqs, 17);
+  assert.equal(models.find((m) => m.srcs[0] === 'dsh')!.peakTps, null);
+  const [session] = latestSessions([total], 1);
+  assert.equal(session.reqs, 17);
+});
+
 test('sourceSummaries aggregates per source with honest avg tps', () => {
   const recs = [
     rec({ src: 'claude', sid: 'a', ts: 1, outTok: 100, durMs: 2000 }),

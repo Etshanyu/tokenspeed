@@ -1,0 +1,36 @@
+name: Bug report
+description: Report incorrect data, a crash, keyboard trouble or a display problem
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Include expected and actual behavior. Do not attach private logs.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Token Speed version
+      placeholder: tokenspeed --version
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: OS, terminal and Node.js version
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Use a synthetic fixture where possible and remove session IDs, project paths, prompts and code.
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    options:
+      - label: I removed private logs, paths, prompts, code and credentials from this report.
+        required: true

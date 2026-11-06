@@ -35,7 +35,7 @@ test('requests renders newest first with headers', () => {
   assert.ok(frame.includes('DURATION'));
   assert.ok(frame.includes('SHOWING 1-10 / 12'));
   assert.ok(frame.includes('newest first'));
-  assert.ok(frame.includes('TPS = output tokens / second'));
+  assert.ok(frame.includes('TPS = estimated output / inferred duration'));
   // newest (index 11) on top; the 10th newest (index 2) is the last visible row;
   // the two oldest are scrolled out of the 10-row window
   assert.ok(frame.indexOf(timeOf(11)) < frame.indexOf(timeOf(2)));
@@ -70,6 +70,35 @@ test('empty state', () => {
   const frame = inst.lastFrame()!;
   inst.unmount();
   assert.ok(frame.includes('no requests'));
+});
+
+test('requests table translates headers, range and hints into Chinese', () => {
+  const inst = render(
+    <Requests records={records} now={NOW} theme={THEMES[0]} srcFilter="all" scroll={0} lang="zh" />,
+  );
+  const frame = inst.lastFrame()!;
+  inst.unmount();
+  assert.ok(frame.includes('请求输出与计时'));
+  assert.ok(frame.includes('会话'));
+  assert.ok(frame.includes('显示 1-10 / 12'));
+  assert.ok(frame.includes('最新优先'));
+  assert.ok(frame.includes('TPS = 估算输出 / 推算时长'));
+});
+
+test('cumulative sessions are not rendered as fabricated request rows', () => {
+  const total: TurnRecord = {
+    ...rec(0), src: 'dsh', outTok: 5000, durMs: 10_000,
+    kind: 'session', requestCount: 25,
+  };
+  const inst = render(
+    <Requests records={[total]} now={NOW} theme={THEMES[0]} srcFilter="dsh" win="all" scroll={0} />,
+  );
+  const frame = inst.lastFrame()!;
+  inst.unmount();
+  assert.ok(frame.includes('session totals only'));
+  assert.ok(frame.includes('per-request history is unavailable'));
+  assert.ok(!frame.includes('25 requests'));
+  assert.ok(!frame.includes('5.0K'));
 });
 
 test('srcFilter hides other sources', () => {
