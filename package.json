@@ -4,6 +4,14 @@
   "description": "Local-first token telemetry TUI for Claude Code, Codex and DSH",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Etshanyu/tokenspeed.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Etshanyu/tokenspeed/issues"
+  },
+  "homepage": "https://github.com/Etshanyu/tokenspeed#readme",
   "bin": {
     "tokenspeed": "dist/main.js"
   },

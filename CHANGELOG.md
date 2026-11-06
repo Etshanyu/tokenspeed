@@ -7,6 +7,8 @@ All notable changes are documented here. The project uses semantic versioning.
 ### Added
 
 - Local-first Claude Code, Codex and DSH token telemetry.
+- Native Python terminal runtime with reliable Windows console input and a one-click launcher.
+- Restrained speed transitions, real-output stream highlights and short border sweeps.
 - Overview, Timeline, Models and Requests views with live incremental refresh.
 - English and Chinese UI with persistent language, page, source, window and theme preferences.
 - Explicit DSH all-time totals, including cumulative output in `OUTPUT ACTIVITY` without fabricated time-series data.

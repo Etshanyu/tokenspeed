@@ -18,4 +18,4 @@
 7. Publish to npm only with the package owner's credentials and `npm publish --access public`. Verify the package page and clean global installation afterward.
 8. Create the release notes and attach only sanitized screenshots or demonstrations.
 
-The current repository has no configured remote, so this checklist intentionally does not invent a project URL or publish automatically.
+The canonical repository is `https://github.com/Etshanyu/tokenspeed`. Keep release tags signed off by the project owner and never publish automatically from an unverified working tree.
