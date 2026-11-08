@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable
 
@@ -31,14 +32,22 @@ def apply_filters(records: Iterable[TurnRecord], src: str, bounds: tuple[float, 
     ]
 
 
-def spark(records: list[TurnRecord], buckets: int = 32) -> list[float]:
+def spark(
+    records: list[TurnRecord], buckets: int = 32,
+    bounds: tuple[float, float] | None = None,
+) -> list[float]:
     if not records:
         return []
-    timestamps = [r.ts for r in records]
-    start, end = min(timestamps), max(timestamps)
+    if bounds is None:
+        timestamps = [r.ts for r in records]
+        start, end = min(timestamps), max(timestamps)
+    else:
+        start, end = bounds
     span = max(1.0, end - start)
     values = [0.0] * buckets
     for record in records:
+        if not start <= record.ts <= end:
+            continue
         index = min(buckets - 1, int(((record.ts - start) / span) * buckets))
         values[index] += record.outTok
     return values
@@ -54,7 +63,10 @@ def median(values: list[float]) -> float | None:
     return (ordered[middle - 1] + ordered[middle]) / 2
 
 
-def source_summaries(records: Iterable[TurnRecord], spark_buckets: int = 32) -> list[dict]:
+def source_summaries(
+    records: Iterable[TurnRecord], spark_buckets: int = 32,
+    spark_bounds: tuple[float, float] | None = None,
+) -> list[dict]:
     grouped: dict[str, list[TurnRecord]] = defaultdict(list)
     for record in records:
         grouped[record.src].append(record)
@@ -77,7 +89,7 @@ def source_summaries(records: Iterable[TurnRecord], spark_buckets: int = 32) -> 
             "reqs": sum(r.requests for r in items),
             "sessions": len({r.sid for r in items}),
             "activeMs": active_ms,
-            "spark": spark(timed, spark_buckets),
+            "spark": spark(timed, spark_buckets, spark_bounds),
             "cumulative": not timed,
         })
     return output
@@ -130,6 +142,79 @@ def model_stats(records: Iterable[TurnRecord]) -> list[dict]:
         })
     rows.sort(key=lambda row: row["outTok"], reverse=True)
     return rows
+
+
+@dataclass(slots=True)
+class OverviewMetrics:
+    summaries: list[dict]
+    activity_summaries: list[dict]
+    spark_bounds: tuple[float, float]
+    bounds: tuple[float, float]
+    buckets: list[dict]
+    models: list[dict]
+    latest: list[TurnRecord]
+    session_count: int
+    model_count: int
+    total_output: int
+
+
+def build_overview_metrics(
+    records: list[TurnRecord], src_filter: str, window: str, now: float,
+    bar_width: int,
+) -> OverviewMetrics:
+    """Compute expensive overview aggregation once per data/view-time key."""
+    selected = window_range(window, now)
+    filtered = apply_filters(records, src_filter, selected)
+    activity = [record for record in filtered if record.is_request]
+    summary_records = filtered if window == "all" else [
+        *filtered, *(record for record in records if record.kind == "session" and (src_filter == "all" or record.src == src_filter)),
+    ]
+    timed_summary = [record for record in summary_records if record.is_request]
+    if window == "all" and timed_summary:
+        spark_bounds = (min(r.ts for r in timed_summary), max(r.ts for r in timed_summary) + 1)
+    elif math.isinf(selected[1]):
+        spark_bounds = (now - 86_400_000, now)
+    else:
+        spark_bounds = selected
+    if activity:
+        minimum, maximum = min(r.ts for r in activity), max(r.ts for r in activity)
+    else:
+        minimum, maximum = now - 86_400_000, now
+    bounds = (minimum, maximum + 1) if window == "all" and activity else selected
+    if math.isinf(bounds[1]):
+        bounds = (now - 86_400_000, now)
+    return OverviewMetrics(
+        summaries=source_summaries(summary_records, spark_bounds=spark_bounds),
+        activity_summaries=source_summaries(activity),
+        spark_bounds=spark_bounds,
+        bounds=bounds,
+        buckets=bucket_records(activity, bounds, bar_width),
+        models=model_stats(filtered)[:3],
+        latest=sorted(activity, key=lambda record: record.ts, reverse=True)[:4],
+        session_count=len({(r.src, r.sid) for r in activity}),
+        model_count=len({r.model for r in activity}),
+        total_output=sum(r.outTok for r in activity),
+    )
+
+
+class OverviewCache:
+    """Single-entry cache; records are replaced, never mutated, by the scanner."""
+
+    def __init__(self) -> None:
+        self._records: list[TurnRecord] | None = None
+        self._key: tuple | None = None
+        self._value: OverviewMetrics | None = None
+
+    def get(
+        self, records: list[TurnRecord], src_filter: str, window: str,
+        now: float, bar_width: int,
+    ) -> OverviewMetrics:
+        key = (src_filter, window, int(now // 1000), bar_width)
+        if self._records is records and self._key == key and self._value is not None:
+            return self._value
+        value = build_overview_metrics(records, src_filter, window, now, bar_width)
+        self._records, self._key, self._value = records, key, value
+        return value
 
 
 def latest_sessions(records: Iterable[TurnRecord], limit: int) -> list[dict]:

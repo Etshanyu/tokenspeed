@@ -1,7 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any
+
+RECORD_FIELDS = (
+    "src", "sid", "proj", "ts", "model", "inTok", "cacheRead",
+    "cacheWrite", "outTok", "reasonTok", "durMs", "kind", "requestCount",
+)
 
 
 @dataclass(slots=True)
@@ -29,20 +34,21 @@ class TurnRecord:
         return 1 if self.is_request else max(0, self.requestCount or 0)
 
     def to_dict(self) -> dict[str, Any]:
-        data = asdict(self)
-        if data["kind"] is None:
-            data.pop("kind")
-        if data["requestCount"] is None:
-            data.pop("requestCount")
+        data = {
+            "src": self.src, "sid": self.sid, "proj": self.proj, "ts": self.ts,
+            "model": self.model, "inTok": self.inTok, "cacheRead": self.cacheRead,
+            "cacheWrite": self.cacheWrite, "outTok": self.outTok,
+            "reasonTok": self.reasonTok, "durMs": self.durMs,
+        }
+        if self.kind is not None:
+            data["kind"] = self.kind
+        if self.requestCount is not None:
+            data["requestCount"] = self.requestCount
         return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TurnRecord":
-        fields = {
-            "src", "sid", "proj", "ts", "model", "inTok", "cacheRead",
-            "cacheWrite", "outTok", "reasonTok", "durMs", "kind", "requestCount",
-        }
-        return cls(**{key: value for key, value in data.items() if key in fields})
+        return cls(**{key: data[key] for key in RECORD_FIELDS if key in data})
 
 
 @dataclass(slots=True, frozen=True)

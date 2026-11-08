@@ -15,6 +15,11 @@ FALLBACK_DUR = 1_000
 SOURCE_ORDER = ("codex", "claude", "dsh")
 SOURCE_LABELS = {"codex": "CODEX", "claude": "CLAUDE", "dsh": "DSH"}
 
+
+class UnsupportedLogFormat(RuntimeError):
+    """A log cannot be decoded until an optional dependency is installed."""
+
+
 try:
     import zstandard as zstd
 except ImportError:  # pragma: no cover - exercised by installations without extras
@@ -29,6 +34,10 @@ def _number(value: Any, default: float = 0) -> float:
 
 def _integer(value: Any) -> int:
     return int(_number(value))
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def parse_timestamp(value: Any) -> float | None:
@@ -94,7 +103,7 @@ def discover(root: str, src: str) -> list[FileEntry]:
 def _read_lines(path: str) -> Iterable[str]:
     if path.endswith(".zst"):
         if zstd is None:
-            raise RuntimeError("zstandard is required to read Codex .zst archives")
+            raise UnsupportedLogFormat("zstandard is required to read Codex .zst archives")
         with open(path, "rb") as compressed:
             with zstd.ZstdDecompressor().stream_reader(compressed) as reader:
                 text = reader.read().decode("utf-8")
@@ -273,27 +282,28 @@ def parse_codex(_root: str, file: FileEntry) -> list[TurnRecord]:
 
 
 def parse_dsh(_root: str, file: FileEntry) -> list[TurnRecord]:
-    try:
-        with open(file.path, encoding="utf-8") as handle:
-            document = json.load(handle)
-    except (OSError, json.JSONDecodeError, UnicodeError):
-        return []
+    with open(file.path, encoding="utf-8") as handle:
+        document = json.load(handle)
     record = document.get("record") if isinstance(document, dict) else None
     if not isinstance(record, dict):
         return []
-    identity = record.get("identity") or {}
-    rows = record.get("rows") or {}
-    totals = rows.get("tokenUsage", {}).get("val", {}).get("totals", {})
-    stats = rows.get("sessionStats", {}).get("val", {})
-    model = rows.get("modelSelection", {}).get("val", {}).get("lastUsed", {}).get("model")
-    last_message = rows.get("timeContext", {}).get("val", {}).get("lastMessageTime")
+    identity = _mapping(record.get("identity"))
+    rows = _mapping(record.get("rows"))
+    token_usage = _mapping(rows.get("tokenUsage"))
+    totals = _mapping(_mapping(token_usage.get("val")).get("totals"))
+    stats = _mapping(_mapping(rows.get("sessionStats")).get("val"))
+    model_selection = _mapping(_mapping(rows.get("modelSelection")).get("val"))
+    last_used = _mapping(model_selection.get("lastUsed"))
+    model = last_used.get("model")
+    time_context = _mapping(_mapping(rows.get("timeContext")).get("val"))
+    last_message = _number(time_context.get("lastMessageTime"))
     decode_ms = _number(stats.get("decodeMs"))
     if decode_ms <= 0:
         decode_ms = 0
     steps = _number(stats.get("steps"), -1)
     name = Path(file.path).stem
     sid = name.removeprefix("session-")
-    ts = last_message if isinstance(last_message, (int, float)) and last_message > 0 else _number(identity.get("createdAt"))
+    ts = last_message if last_message > 0 else _number(identity.get("createdAt"))
     return [TurnRecord(
         src="dsh", sid=sid,
         proj=identity.get("cwd") if isinstance(identity.get("cwd"), str) else "",

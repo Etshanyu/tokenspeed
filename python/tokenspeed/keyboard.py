@@ -180,7 +180,7 @@ class Keyboard:
                 key = "shift_tab"
             elif key == "c" and control:
                 key = "q"
-            elif key in ("g", "l") and shift:
+            elif key in ("g", "l", "r") and shift:
                 key = key.upper()
             output.append(key)
         return output
@@ -214,7 +214,7 @@ class Keyboard:
                 key = "shift_tab"
             elif key == "c" and control:
                 key = "q"
-            elif key in ("g", "l") and shift:
+            elif key in ("g", "l", "r") and shift:
                 key = key.upper()
             output.append(key)
         return output

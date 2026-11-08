@@ -4,7 +4,14 @@ Thanks for improving Token Speed. By contributing, you agree that your contribut
 
 ## Setup
 
-Use Node.js 20 or newer:
+The recommended Python runtime requires Python 3.10 or newer:
+
+```bash
+python -m compileall -q python/tokenspeed
+PYTHONPATH=python python -m unittest discover -s python/tests -v
+```
+
+For the Node.js runtime, use Node.js 20 or newer:
 
 ```bash
 npm ci
@@ -13,7 +20,7 @@ npm test
 npm run build
 ```
 
-Before submitting a change, also run `npm pack --dry-run` when packaging or build files changed.
+Before submitting a change, run the checks for every runtime you modified. Also run `npm pack --dry-run` when packaging or build files changed.
 
 ## Data fixtures
 

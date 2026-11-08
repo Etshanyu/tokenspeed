@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import TurnRecord
-from .sources import SOURCE_ORDER, available, discover, parse_file
+from .sources import SOURCE_ORDER, UnsupportedLogFormat, available, discover, parse_file, zstd
 
 CACHE_VERSION = 2
 
@@ -42,8 +42,18 @@ def save_cache(cache_dir: Path, store: dict[str, Any]) -> None:
     os.replace(temporary, target)
 
 
+def _cached_records(cached: Any) -> tuple[list[TurnRecord], list[dict]] | None:
+    if not isinstance(cached, dict) or not isinstance(cached.get("records"), list):
+        return None
+    try:
+        serialized = cached["records"]
+        return [TurnRecord.from_dict(item) for item in serialized], serialized
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
 def scan_all(root: str, cache_dir: Path, rescan: bool = False) -> tuple[list[TurnRecord], int, int]:
-    cache = None if rescan else load_cache(cache_dir)
+    cache = load_cache(cache_dir)
     cached_files = cache.get("files", {}) if cache else {}
     files: dict[str, Any] = {}
     records: list[TurnRecord] = []
@@ -53,22 +63,47 @@ def scan_all(root: str, cache_dir: Path, rescan: bool = False) -> tuple[list[Tur
             continue
         for entry in discover(root, src):
             cached = cached_files.get(entry.path)
-            file_records: list[TurnRecord]
-            if cached and cached.get("mtimeMs") == entry.mtimeMs and cached.get("size") == entry.size:
-                file_records = [TurnRecord.from_dict(item) for item in cached.get("records", [])]
+            cached_result = _cached_records(cached)
+            if cached_result is None:
+                cached = None
+            if cached_result and entry.path.endswith(".zst") and zstd is None and cached.get("retry"):
+                # Migrate retries produced by older versions without rescanning.
+                cached = {**cached, "unsupported": "zstandard"}
+                cached.pop("retry", None)
+            cache_matches = cached.get("mtimeMs") == entry.mtimeMs and cached.get("size") == entry.size if cached else False
+            decoder_reusable = not cached or cached.get("unsupported") != "zstandard" or zstd is None
+            if not rescan and cached_result and not cached.get("retry") and cache_matches and decoder_reusable:
+                file_records, _ = cached_result
+                files[entry.path] = cached
+                records.extend(file_records)
                 from_cache += 1
+                continue
+            try:
+                file_records = parse_file(root, src, entry)
+            except UnsupportedLogFormat:
+                # Missing optional decoders are stable until the next launch or a
+                # full rescan. Avoid retrying every archive every five seconds.
+                file_records, serialized = cached_result if cached_result else ([], [])
+                files[entry.path] = {
+                    "mtimeMs": entry.mtimeMs, "size": entry.size,
+                    "records": serialized, "unsupported": "zstandard",
+                }
+            except Exception:
+                # Transient parse failures keep the last good records and retry.
+                file_records, serialized = cached_result if cached_result else ([], [])
+                files[entry.path] = {
+                    "mtimeMs": entry.mtimeMs, "size": entry.size,
+                    "records": serialized, "retry": True,
+                }
             else:
-                try:
-                    file_records = parse_file(root, src, entry)
-                except (OSError, ValueError, RuntimeError):
-                    # Never erase a valid cache because an optional decoder is absent
-                    # or a log is temporarily unreadable during rotation.
-                    file_records = [TurnRecord.from_dict(item) for item in cached.get("records", [])] if cached else []
-                scanned += 1
-            serialized = [record.to_dict() for record in file_records]
-            files[entry.path] = {"mtimeMs": entry.mtimeMs, "size": entry.size, "records": serialized}
+                files[entry.path] = {
+                    "mtimeMs": entry.mtimeMs, "size": entry.size,
+                    "records": [record.to_dict() for record in file_records],
+                }
+            scanned += 1
             records.extend(file_records)
-    save_cache(cache_dir, {"version": CACHE_VERSION, "files": files})
+    if rescan or cache is None or files != cached_files:
+        save_cache(cache_dir, {"version": CACHE_VERSION, "files": files})
     return records, scanned, from_cache
 
 

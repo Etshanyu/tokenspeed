@@ -4,7 +4,10 @@ import math
 from typing import Any
 
 from . import __version__
-from .metrics import apply_filters, bucket_records, model_stats, source_summaries, window_range
+from .metrics import (
+    OverviewCache, apply_filters, build_overview_metrics, bucket_records,
+    model_stats, source_summaries, window_range,
+)
 from .models import TurnRecord
 from .sources import SOURCE_LABELS, SOURCE_ORDER
 from .terminal import (
@@ -41,7 +44,8 @@ TEXT = {
         "pages": ("Overview", "Timeline", "Models", "Requests"), "source": "SOURCE", "window": "WINDOW",
         "windows": ("Today", "7 days", "30 days", "All time"), "all": "All",
         "status": "Claude/Codex TPS estimated · DSH card = All-time totals",
-        "help": "Tab view · 1-4 source · t/w/a range · ↑/↓ scroll · l 中文 · r refresh · x theme · q quit",
+        "refreshing": "refreshing changed logs…", "refresh_failed": "refresh failed · showing last valid data",
+        "help": "Tab view · 1-4 source · t/w/a range · ↑/↓ scroll · l 中文 · r refresh · R full scan · x theme · q quit",
         "weighted": "weighted request throughput", "cumulative": "cumulative session decode",
         "rate": "output tokens / second", "decode": "decode tokens / second",
         "median": "Median", "requests": "requests", "calls": "model calls · cumulative total",
@@ -65,7 +69,8 @@ TEXT = {
         "pages": ("概览", "时间线", "模型", "请求"), "source": "来源", "window": "窗口",
         "windows": ("今天", "7 天", "30 天", "全部"), "all": "全部",
         "status": "Claude/Codex TPS 为估算 · DSH 卡片为全部累计",
-        "help": "Tab 视图 · 1-4 来源 · t/w/a 范围 · ↑/↓ 滚动 · l EN · r 刷新 · x 主题 · q 退出",
+        "refreshing": "正在刷新变化日志…", "refresh_failed": "刷新失败 · 正在显示最后有效数据",
+        "help": "Tab 视图 · 1-4 来源 · t/w/a 范围 · ↑/↓ 滚动 · l EN · r 快刷 · R 全扫 · x 主题 · q 退出",
         "weighted": "加权请求吞吐", "cumulative": "会话累计解码",
         "rate": "输出 Token / 秒", "decode": "实测会话解码 Token / 秒",
         "median": "中位数", "requests": "请求", "calls": "次模型调用 · 全部累计",
@@ -105,7 +110,30 @@ def _date_label(ts: float, lang: str) -> str:
     return f"{date:%m/%d %H}{'时' if lang == 'zh' else 'h'}"
 
 
-def _source_card(summary: dict, card_width: int, theme: dict, lang: str, now: float, fx: Any) -> list[list[Seg]]:
+def _bucket_label(bucket_ms: float) -> str:
+    if bucket_ms >= 86_400_000:
+        return f"{bucket_ms / 86_400_000:.1f}d"
+    if bucket_ms >= 3_600_000:
+        return f"{bucket_ms / 3_600_000:.1f}h"
+    return f"{max(1, round(bucket_ms / 60_000))}m"
+
+
+def _chart_axis(bounds: tuple[float, float], count: int, lang: str) -> str:
+    start, end = local_datetime(bounds[0]), local_datetime(bounds[1])
+    hour = "时" if lang == "zh" else "h"
+    if start.date() == end.date():
+        dates = f"{start:%m/%d} {start:%H}{hour} → {end:%H}{hour}"
+    else:
+        dates = f"{start:%m/%d} → {end:%m/%d}"
+    unit = "格" if lang == "zh" else "col"
+    bucket = _bucket_label(max(1, (bounds[1] - bounds[0]) / max(1, count)))
+    return f"{dates} · {bucket}/{unit}"
+
+
+def _source_card(
+    summary: dict, card_width: int, theme: dict, lang: str, now: float, fx: Any,
+    spark_bounds: tuple[float, float],
+) -> list[list[Seg]]:
     text = TEXT[lang]
     src = summary["src"]
     color = theme["sources"].get(src, theme["accent"])
@@ -130,50 +158,68 @@ def _source_card(summary: dict, card_width: int, theme: dict, lang: str, now: fl
     if summary["cumulative"]:
         content.append([Seg(f"{text['all_sessions']} · {summary['sessions']} {text['sessions']}", theme["dim"])])
     else:
-        content.extend(histogram(summary["spark"], max(4, card_width - 4), 3, color))
+        chart_width = max(4, card_width - 4)
+        content.extend(histogram(summary["spark"], chart_width, 3, color))
+        content.append([Seg(fit(_chart_axis(spark_bounds, chart_width, lang), chart_width), theme["dim"])])
     title = [
         Seg(SOURCE_LABELS.get(src, src.upper()), color, True), Seg("  "),
         Seg(text["cumulative"] if summary["cumulative"] else text["weighted"], theme["dim"]),
     ]
     sweep = fx.sweep(now, ("source", "page")) if fx else None
-    return panel(card_width, 18, title, content, color, sweep)
+    return panel(card_width, 17, title, content, color, sweep)
 
 
-def _overview(records: list[TurnRecord], state: Any, now: float, terminal_width: int, theme: dict) -> list[list[Seg]]:
+def _overview(
+    records: list[TurnRecord], state: Any, now: float, terminal_width: int,
+    theme: dict, cache: OverviewCache | None = None,
+) -> list[list[Seg]]:
     lang = state.lang
     text = TEXT[lang]
-    filtered = apply_filters(records, state.src_filter, window_range(state.win, now))
-    activity = [record for record in filtered if record.is_request]
-    summary_records = filtered if state.win == "all" else [
-        *filtered, *(record for record in records if record.kind == "session" and (state.src_filter == "all" or record.src == state.src_filter)),
-    ]
+
+    def layout(source_count: int) -> tuple[int, int, int]:
+        card = max(12, (terminal_width - source_count + 1) // source_count)
+        grid = card * source_count + source_count - 1
+        right = card if source_count > 1 else max(24, grid // 3)
+        left = grid - right - 1
+        return card, left, right
+
+    card_width, left_width, right_width = layout(len(SOURCE_ORDER))
+    left_inner, right_inner = left_width - 4, right_width - 4
+    bar_width = max(4, left_inner - 17)
+
+    def load_metrics(current_bar_width: int):
+        return (
+            cache.get(records, state.src_filter, state.win, now, current_bar_width)
+            if cache is not None else
+            build_overview_metrics(records, state.src_filter, state.win, now, current_bar_width)
+        )
+
+    metrics = load_metrics(bar_width)
     order = {src: index for index, src in enumerate(SOURCE_ORDER)}
-    summaries = sorted(source_summaries(summary_records), key=lambda row: order.get(row["src"], 99))
-    activity_summaries = sorted(source_summaries(activity), key=lambda row: order.get(row["src"], 99))
+    summaries = sorted(metrics.summaries, key=lambda row: order.get(row["src"], 99))
+    activity_summaries = sorted(metrics.activity_summaries, key=lambda row: order.get(row["src"], 99))
     if not summaries:
         return panel(terminal_width, 3, [], [[Seg(text["none"], theme["dim"])]], theme["border"])
 
-    card_width = max(12, (terminal_width - len(summaries) + 1) // len(summaries))
+    adjusted = layout(len(summaries))
+    if adjusted != (card_width, left_width, right_width):
+        card_width, left_width, right_width = adjusted
+        left_inner, right_inner = left_width - 4, right_width - 4
+        adjusted_bar_width = max(4, left_inner - 17)
+        if adjusted_bar_width != bar_width:
+            bar_width = adjusted_bar_width
+            metrics = load_metrics(bar_width)
+            summaries = sorted(metrics.summaries, key=lambda row: order.get(row["src"], 99))
+            activity_summaries = sorted(metrics.activity_summaries, key=lambda row: order.get(row["src"], 99))
+
     fx = getattr(state, "fx", None)
-    cards = [_source_card(summary, card_width, theme, lang, now, fx) for summary in summaries]
+    cards = [_source_card(summary, card_width, theme, lang, now, fx, metrics.spark_bounds) for summary in summaries]
     lines = join_columns(cards, [card_width] * len(cards), 1)
-    left_width = (terminal_width - 2) * 2 // 3
-    right_width = terminal_width - 2 - left_width
-    left_inner, right_inner = left_width - 4, right_width - 4
-    if activity:
-        minimum, maximum = min(r.ts for r in activity), max(r.ts for r in activity)
-    else:
-        minimum, maximum = now - 86_400_000, now
-    selected = window_range(state.win, now)
-    bounds = (minimum, maximum + 1) if state.win == "all" and activity else selected
-    if math.isinf(bounds[1]):
-        bounds = (now - 86_400_000, now)
-    bar_width = max(4, left_inner - 17)
-    buckets = bucket_records(activity, bounds, bar_width)
+    bounds, buckets = metrics.bounds, metrics.buckets
     sources = [summary["src"] for summary in activity_summaries]
     peak = max([1, *(bucket["out"].get(src, 0) for bucket in buckets for src in sources)])
     bucket_ms = max(1, (bounds[1] - bounds[0]) / bar_width)
-    bucket_label = f"{bucket_ms / 86_400_000:.1f}d" if bucket_ms >= 86_400_000 else f"{bucket_ms / 3_600_000:.1f}h" if bucket_ms >= 3_600_000 else f"{max(1, round(bucket_ms / 60_000))}m"
+    bucket_label = _bucket_label(bucket_ms)
     activity_content: list[list[Seg]] = [
         [Seg(f"{_date_label(bounds[0], lang)} → {_date_label(bounds[1], lang)} · {bucket_label}/bucket", theme["dim"])],
         [Seg(fit(text["source"], 7) + " " + fit(text["bucket_activity"], bar_width) + " " + fit(text["total"], 8, "right"), theme["dim"])],
@@ -193,7 +239,7 @@ def _overview(records: list[TurnRecord], state: Any, now: float, terminal_width:
         Seg(text["activity"], theme["text"], True), Seg(f" · {text['per_bucket']}", theme["dim"]),
     ], activity_content, theme["border"], page_sweep)
 
-    models = model_stats(filtered)[:3]
+    models = metrics.models
     max_model = max([1, *(model["outTok"] for model in models)])
     usage_content: list[list[Seg]] = []
     for model in models:
@@ -209,21 +255,17 @@ def _overview(records: list[TurnRecord], state: Any, now: float, terminal_width:
         Seg(text["usage"], theme["text"], True), Seg(f" · {text['share']}", theme["dim"]),
     ], usage_content, theme["border"], page_sweep)
     lines.extend(blank())
-    lines.extend(join_columns([upper_left, upper_right], [left_width, right_width], 2))
+    lines.extend(join_columns([upper_left, upper_right], [left_width, right_width], 1))
 
-    latest = sorted(activity, key=lambda record: record.ts, reverse=True)[:4]
-    session_count = len({(r.src, r.sid) for r in activity})
-    model_count = len({r.model for r in activity})
-    total_output = sum(r.outTok for r in activity)
     compact = left_inner < 64
     time_width, src_width, dur_width, out_width = (11, 5, 8, 8) if compact else (14, 6, 11, 11)
     model_width = max(4, left_inner - time_width - src_width - dur_width - out_width - 8)
     latest_content: list[list[Seg]] = [
-        [Seg(f"{session_count} {text['sessions']} · {model_count} {text['models']} · {fmt_tok(total_output)} {text['output_tokens']}", theme["dim"])],
+        [Seg(f"{metrics.session_count} {text['sessions']} · {metrics.model_count} {text['models']} · {fmt_tok(metrics.total_output)} {text['output_tokens']}", theme["dim"])],
         [],
         [Seg(f"{fit(text['time'], time_width)}  {fit(text['source'], src_width)}  {fit(text['duration'], dur_width)}  {fit(text['output'], out_width)}  {fit(text['model'], model_width)}", theme["dim"])],
     ]
-    for record in latest:
+    for record in metrics.latest:
         date = local_datetime(record.ts)
         timestamp = f"{date:%m/%d %H:%M}" if compact else f"{date:%m/%d %H:%M:%S}"
         latest_content.append([
@@ -254,7 +296,7 @@ def _overview(records: list[TurnRecord], state: Any, now: float, terminal_width:
         output_content.append([Seg(text["no_series"], theme["dim"])])
     lower_right = panel(right_width, 10, [[Seg(text["activity_out"], theme["text"], True)]], output_content, theme["border"], page_sweep)
     lines.extend(blank())
-    lines.extend(join_columns([lower_left, lower_right], [left_width, right_width], 2))
+    lines.extend(join_columns([lower_left, lower_right], [left_width, right_width], 1))
     return lines
 
 
@@ -376,7 +418,11 @@ def _requests(records: list[TurnRecord], state: Any, now: float, terminal_width:
     return panel(terminal_width, len(content) + 4, [[Seg(text["pages"][3].upper(), theme["text"], True)]], content, theme["border"], sweep)
 
 
-def render_app(records: list[TurnRecord], state: Any, terminal_width: int, now: float, last_refresh: float, live: bool = True) -> list[list[Seg]]:
+def render_app(
+    records: list[TurnRecord], state: Any, terminal_width: int, now: float,
+    last_refresh: float, live: bool = True, *, scanning: bool = False,
+    scan_error: Exception | None = None, overview_cache: OverviewCache | None = None,
+) -> list[list[Seg]]:
     theme = THEMES[state.theme_idx % len(THEMES)]
     lang, text = state.lang, TEXT[state.lang]
     terminal_width = max(72, terminal_width)
@@ -414,7 +460,7 @@ def render_app(records: list[TurnRecord], state: Any, terminal_width: int, now: 
     lines.append(_left_right(filters, windows, terminal_width))
     lines.extend(blank())
     if state.page == "overview":
-        lines.extend(_overview(records, state, now, terminal_width, theme))
+        lines.extend(_overview(records, state, now, terminal_width, theme, overview_cache))
     elif state.page == "timeline":
         lines.extend(_timeline(records, state, now, terminal_width, theme))
     elif state.page == "models":
@@ -422,6 +468,23 @@ def render_app(records: list[TurnRecord], state: Any, terminal_width: int, now: 
     else:
         lines.extend(_requests(records, state, now, terminal_width, theme))
     lines.extend(blank())
-    lines.append([Seg(f"● {text['status']} · {len(records)} {text['records']} · {text['refreshed']} {max(0, round((now - last_refresh) / 1000))}s", theme["dim"])])
-    lines.append([Seg(text["help"], theme["dim"])])
+    age = max(0, round((now - last_refresh) / 1000))
+    if scanning:
+        status, icon, color = text["refreshing"], "↻", theme["accent"]
+    elif scan_error is not None:
+        status, icon, color = text["refresh_failed"], "!", theme["sources"]["claude"]
+    else:
+        status, icon, color = text["status"], "●", theme["dim"]
+    status_line = [Seg(f"{icon} {status} · {len(records)} {text['records']} · {text['refreshed']} {age}s", color)]
+    help_line = []
+    for index, item in enumerate(text["help"].split(" · ")):
+        key, label = item.split(" ", 1)
+        if index:
+            help_line.append(Seg("  "))
+        help_line.extend([
+            Seg(f" {key} ", theme["bg"], True, "#e8fbff"),
+            Seg(label, theme["dim"]),
+        ])
+    lines.append(help_line)
+    lines.append(status_line)
     return lines

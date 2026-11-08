@@ -10,6 +10,8 @@ from pathlib import Path
 
 from .effects import VisualEffects
 from .keyboard import Keyboard
+from .metrics import OverviewCache
+from .scanner import BackgroundScanner
 from .store import load_preferences, save_preferences, scan_all
 from .terminal import render_line
 from .ui import THEMES, render_app
@@ -52,6 +54,8 @@ class AppState:
             return "quit"
         if key == "r":
             return "refresh"
+        if key == "R":
+            return "rescan"
         if key in ("f1", "f2", "f3", "f4"):
             self.page = PAGES[int(key[-1]) - 1]
             self.scroll = 0
@@ -102,10 +106,17 @@ def enable_windows_ansi() -> None:
         pass
 
 
-def draw(records, state: AppState, now: float, last_refresh: float, live: bool) -> None:
+def draw(
+    records, state: AppState, now: float, last_refresh: float, live: bool,
+    scanning: bool = False, scan_error: Exception | None = None,
+    overview_cache: OverviewCache | None = None,
+) -> None:
     size = shutil.get_terminal_size((120, 50))
     terminal_width = max(72, size.columns)
-    lines = render_app(records, state, terminal_width, now, last_refresh, live)
+    lines = render_app(
+        records, state, terminal_width, now, last_refresh, live,
+        scanning=scanning, scan_error=scan_error, overview_cache=overview_cache,
+    )
     output = ["\x1b[H"]
     for line in lines[:max(1, size.lines - 1)]:
         output.append("\x1b[2K" + render_line(line, terminal_width) + "\r\n")
@@ -125,50 +136,64 @@ def run(root: str, cache_dir: Path, overrides: dict, live: bool = True, rescan: 
     last_refresh = time.time() * 1000
     state.fx = VisualEffects()
     state.fx.observe_records(records, last_refresh)
+    overview_cache = OverviewCache()
     dirty = True
     running = True
     was_animating = False
     last_scan = time.monotonic()
     last_clock_second = -1
-    with Keyboard() as reader:
+    with BackgroundScanner(root, cache_dir) as scanner, Keyboard() as reader:
         sys.stdout.write("\x1b[?1049h\x1b[?25l\x1b[2J")
         try:
             while running:
                 for key in reader.read_keys():
                     previous = (state.page, state.src_filter, state.win)
+                    previous_preferences = state.preferences()
                     action = state.handle_key(key)
                     if action == "quit":
                         running = False
                         break
-                    if action == "refresh":
-                        records, _, _ = scan_all(root, cache_dir)
-                        last_refresh = time.time() * 1000
-                        state.fx.observe_records(records, last_refresh)
+                    if action in ("refresh", "rescan"):
+                        scanner.schedule(rescan=action == "rescan")
                         last_scan = time.monotonic()
+                        dirty = True
+                        continue
                     if action == "changed":
                         current_view = (state.page, state.src_filter, state.win)
                         kind = "page" if current_view[0] != previous[0] else "source" if current_view[1:] != previous[1:] else "ui"
                         state.fx.trigger(kind, time.time() * 1000)
-                    if action:
+                    if action and state.preferences() != previous_preferences:
                         save_preferences(cache_dir, state.preferences())
                     dirty = True
                 if not running:
                     break
-                if live and time.monotonic() - last_scan >= 5:
-                    records, _, _ = scan_all(root, cache_dir)
+                result = scanner.poll()
+                if result is not None:
+                    records = result[0]
                     last_refresh = time.time() * 1000
                     state.fx.observe_records(records, last_refresh)
-                    last_scan = time.monotonic()
+                    dirty = True
+                monotonic = time.monotonic()
+                if scanner.busy:
+                    # Do not stack periodic scans behind a slow manual refresh.
+                    last_scan = monotonic
+                elif live and monotonic - last_scan >= 5:
+                    scanner.schedule()
+                    last_scan = monotonic
                     dirty = True
                 current = time.time() * 1000
                 clock_second = int(current / 1000)
                 animating = state.fx.active(current)
                 if dirty or clock_second != last_clock_second or animating or was_animating:
-                    draw(records, state, current, last_refresh, live)
+                    draw(
+                        records, state, current, last_refresh, live,
+                        scanning=scanner.busy, scan_error=scanner.last_error,
+                        overview_cache=overview_cache,
+                    )
                     last_clock_second = clock_second
                     dirty = False
                 was_animating = animating
-                time.sleep(0.04)
+                time.sleep(0.02)
         finally:
             sys.stdout.write("\x1b[0m\x1b[?25h\x1b[?1049l")
             sys.stdout.flush()
